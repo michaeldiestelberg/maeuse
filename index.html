@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<!--
+   ______                            __
+  / ____/___  ____ ___  ____  __  __/ /____  _____
+ / /   / __ \/ __ `__ \/ __ \/ / / / __/ _ \/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/  __/ /
+\____/\____/_/ /_/ /_/ .___/\__,_/\__/\___/_/
+                    /_/
+        Created with Perplexity Computer
+        https://www.perplexity.ai/computer
+-->
+
+<!-- Perplexity Computer Attribution — SEO Meta Tags -->
+<meta name="generator" content="Perplexity Computer">
+<meta name="author" content="Perplexity Computer">
+<meta property="og:see_also" content="https://www.perplexity.ai/computer">
+<link rel="author" href="https://www.perplexity.ai/computer">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Mäuse">
+<meta name="theme-color" content="#01696f">
+<link rel="apple-touch-icon" href="./assets/icon-180.png">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/png" href="./assets/icon-192.png">
+
+<title>Mäuse</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ==================== HEADER ==================== -->
+  <header class="app-header">
+    <div class="header-row">
+      <h1 class="app-title">Mäuse</h1>
+      <div class="header-actions">
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== MAIN VIEW ==================== -->
+  <div class="view active" id="mainView">
+
+    <!-- Month Summary -->
+    <section class="summary-section">
+      <div class="month-nav">
+        <button class="month-nav-btn" id="prevMonth" aria-label="Vorheriger Monat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </button>
+        <span class="month-label" id="monthLabel">März 2026</span>
+        <button class="month-nav-btn" id="nextMonth" aria-label="Nächster Monat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="summary-card">
+        <div class="summary-stats">
+          <div class="stat-item">
+            <span class="stat-label">Gesamt</span>
+            <span class="stat-value" id="totalAmount">0,00 €</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Anteil Frau</span>
+            <span class="stat-value primary" id="wifeAmount">0,00 €</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Expense List -->
+    <section class="expense-list-section scroll-container" id="expenseList">
+      <!-- dynamically populated -->
+    </section>
+  </div>
+
+  <!-- ==================== FAB ==================== -->
+  <button class="fab" id="addBtn" aria-label="Ausgabe hinzufügen">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  </button>
+</div>
+
+<!-- ==================== ADD/EDIT SHEET ==================== -->
+<div class="sheet-overlay" id="sheetOverlay"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="sheet-action-btn" id="sheetCancel">Abbrechen</button>
+    <span class="sheet-title" id="sheetTitle">Neue Ausgabe</span>
+    <button class="sheet-action-btn" id="sheetSave">Fertig</button>
+  </div>
+  <div class="sheet-body">
+    <!-- Amount (hero) -->
+    <div class="amount-input-wrapper">
+      <span class="amount-currency">€</span>
+      <input type="text" inputmode="decimal" class="amount-input" id="inputAmount" placeholder="0,00" autocomplete="off">
+    </div>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label" for="inputDesc">Beschreibung</label>
+      <input type="text" class="form-input" id="inputDesc" placeholder="z.B. Einkauf, Restaurant…" autocomplete="off">
+    </div>
+
+    <!-- Date -->
+    <div class="form-group">
+      <label class="form-label">Datum</label>
+      <div class="date-row">
+        <input type="date" class="date-input" id="inputDate">
+        <button class="today-btn" id="todayBtn">Heute</button>
+      </div>
+    </div>
+
+    <!-- Split -->
+    <div class="form-group">
+      <label class="form-label">Aufteilung</label>
+      <div class="split-toggle" id="splitToggle">
+        <button class="split-toggle-btn active" data-mode="percent">Prozent</button>
+        <button class="split-toggle-btn" data-mode="fixed">Fester Betrag</button>
+      </div>
+
+      <!-- Preset chips for percentage mode -->
+      <div class="preset-chips" id="presetChips">
+        <button class="preset-chip active" data-value="50">50 %</button>
+        <button class="preset-chip" data-value="30">30 %</button>
+        <button class="preset-chip" data-value="70">70 %</button>
+        <button class="preset-chip" data-value="100">100 %</button>
+      </div>
+
+      <div class="split-value-row">
+        <div class="split-input-wrapper">
+          <input type="text" inputmode="decimal" class="split-input" id="inputSplit" value="50" autocomplete="off">
+          <span class="split-suffix" id="splitSuffix">%</span>
+        </div>
+        <span class="split-result" id="splitResult">= 0,00 €</span>
+      </div>
+    </div>
+
+    <!-- Delete button (edit mode only) -->
+    <div class="delete-row" id="deleteRow" style="display:none;">
+      <button class="delete-btn" id="deleteBtn">Ausgabe löschen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Attribution -->
+<div class="attribution">
+  <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
+</div>
+
+<script src="./app.js"></script>
+</body>
+</html>
