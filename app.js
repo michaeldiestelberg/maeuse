@@ -111,7 +111,7 @@
   const $ = (sel) => document.querySelector(sel);
   const monthLabel = $('#monthLabel');
   const totalAmountEl = $('#totalAmount');
-  const wifeAmountEl = $('#wifeAmount');
+  const partnerAmountEl = $('#partnerAmount');
   const expenseListEl = $('#expenseList');
   const addBtn = $('#addBtn');
   const sheetOverlay = $('#sheetOverlay');
@@ -134,18 +134,18 @@
   let splitMode = 'percent'; // 'percent' or 'fixed'
 
   // ==================== HELPERS ====================
-  const germanMonths = [
-    'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
   function formatEuro(n) {
-    return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
   }
 
   function formatDate(dateStr) {
     const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+    return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
   }
 
   function todayISO() {
@@ -165,7 +165,7 @@
     return isNaN(n) ? 0 : Math.round(n * 100) / 100;
   }
 
-  function calcWifeShare(expense) {
+  function calcPartnerShare(expense) {
     if (expense.splitMode === 'percent') {
       return Math.round(expense.amount * (expense.splitValue / 100) * 100) / 100;
     } else {
@@ -194,9 +194,65 @@
     }
   })();
 
+  // ==================== ONBOARDING ====================
+  const onboardingEl = $('#onboarding');
+  const onboardingStartBtn = $('#onboardingStart');
+  const aboutBtn = $('#aboutBtn');
+  let onboardingSeen = false;
+
+  function showOnboarding() {
+    onboardingEl.classList.remove('hidden');
+  }
+
+  function hideOnboarding() {
+    onboardingEl.classList.add('hidden');
+    // Remove from DOM after transition
+    setTimeout(() => {
+      if (onboardingEl.classList.contains('hidden')) {
+        onboardingEl.style.display = 'none';
+      }
+    }, 500);
+  }
+
+  function checkOnboarding() {
+    // Use IndexedDB-based flag if available, otherwise always show in memory mode
+    if (useMemoryFallback) {
+      // In memory mode, show onboarding on every load (no persistence)
+      showOnboarding();
+      return;
+    }
+    // Check a simple flag in IndexedDB
+    try {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => {
+        // If user has any expenses, they've used the app before
+        if (req.result && req.result.length > 0) {
+          onboardingSeen = true;
+          onboardingEl.style.display = 'none';
+        } else {
+          showOnboarding();
+        }
+      };
+      req.onerror = () => { showOnboarding(); };
+    } catch (e) {
+      showOnboarding();
+    }
+  }
+
+  onboardingStartBtn.addEventListener('click', () => {
+    onboardingSeen = true;
+    hideOnboarding();
+  });
+
+  aboutBtn.addEventListener('click', () => {
+    onboardingEl.style.display = '';
+    showOnboarding();
+  });
+
   // ==================== MONTH NAVIGATION ====================
   function updateMonthLabel() {
-    monthLabel.textContent = germanMonths[currentMonth] + ' ' + currentYear;
+    monthLabel.textContent = monthNames[currentMonth] + ' ' + currentYear;
   }
 
   $('#prevMonth').addEventListener('click', () => {
@@ -224,15 +280,15 @@
   function renderList() {
     const items = getMonthExpenses();
     let totalSum = 0;
-    let wifeSum = 0;
+    let partnerSum = 0;
 
     items.forEach(e => {
       totalSum += e.amount;
-      wifeSum += calcWifeShare(e);
+      partnerSum += calcPartnerShare(e);
     });
 
     totalAmountEl.textContent = formatEuro(totalSum);
-    wifeAmountEl.textContent = formatEuro(wifeSum);
+    partnerAmountEl.textContent = formatEuro(partnerSum);
 
     if (items.length === 0) {
       expenseListEl.innerHTML = `
@@ -243,8 +299,8 @@
               <path d="M2 10h20"/>
             </svg>
           </div>
-          <div class="empty-state-title">Keine Ausgaben</div>
-          <div class="empty-state-text">Tippe auf + um eine geteilte Ausgabe zu erfassen</div>
+          <div class="empty-state-title">No expenses yet</div>
+          <div class="empty-state-text">Tap + to log a shared expense</div>
         </div>
       `;
       return;
@@ -263,10 +319,10 @@
     for (const [dateLabel, group] of Object.entries(groups)) {
       html += `<div class="list-header">${dateLabel}</div>`;
       group.forEach(e => {
-        const share = calcWifeShare(e);
+        const share = calcPartnerShare(e);
         const splitLabel = e.splitMode === 'percent'
-          ? `${e.splitValue} %`
-          : `fester Betrag`;
+          ? `${e.splitValue}%`
+          : 'fixed amount';
         html += `
           <div class="expense-item animate-in" style="animation-delay:${animIdx * 40}ms" data-id="${e.id}">
             <div class="expense-icon">
@@ -276,7 +332,7 @@
               </svg>
             </div>
             <div class="expense-details">
-              <div class="expense-desc">${escapeHtml(e.description || 'Ausgabe')}</div>
+              <div class="expense-desc">${escapeHtml(e.description || 'Expense')}</div>
               <div class="expense-meta">${splitLabel}</div>
             </div>
             <div class="expense-amounts">
@@ -308,16 +364,16 @@
   // ==================== SHEET (ADD/EDIT) ====================
   function openSheet(expense) {
     editingId = expense ? expense.id : null;
-    sheetTitle.textContent = expense ? 'Ausgabe bearbeiten' : 'Neue Ausgabe';
+    sheetTitle.textContent = expense ? 'Edit Expense' : 'New Expense';
     deleteRow.style.display = expense ? 'block' : 'none';
 
     // Reset form
     if (expense) {
-      inputAmount.value = expense.amount.toFixed(2).replace('.', ',');
+      inputAmount.value = expense.amount.toFixed(2);
       inputDesc.value = expense.description;
       inputDate.value = expense.date;
       splitMode = expense.splitMode;
-      inputSplit.value = expense.splitValue.toString().replace('.', ',');
+      inputSplit.value = expense.splitValue.toString();
     } else {
       inputAmount.value = '';
       inputDesc.value = '';
@@ -449,7 +505,7 @@
       inputSplit.value = '50';
     } else {
       const amount = parseAmount(inputAmount.value);
-      inputSplit.value = (amount / 2).toFixed(2).replace('.', ',');
+      inputSplit.value = (amount / 2).toFixed(2);
     }
     updatePresetChips();
     updateSplitResult();
@@ -504,11 +560,6 @@
     if (banner) banner.classList.add('visible');
   }
 
-  function hideMemoryWarning() {
-    const banner = document.getElementById('memoryWarning');
-    if (banner) banner.classList.remove('visible');
-  }
-
   // ==================== INIT ====================
   async function init() {
     await openDB();
@@ -516,6 +567,7 @@
     expenses = await dbGetAll();
     updateMonthLabel();
     renderList();
+    checkOnboarding();
   }
 
   init();

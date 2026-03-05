@@ -175,6 +175,145 @@ input, button, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-color: transparent; }
 
 /* ============================================
+   ONBOARDING SCREEN
+   ============================================ */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.4s var(--ease-out);
+}
+
+.onboarding.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.onboarding-content {
+  max-width: 340px;
+  width: 100%;
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.onboarding-logo {
+  width: 88px;
+  height: 88px;
+}
+
+.onboarding-logo svg {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-xl);
+}
+
+.onboarding-title {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+  margin-top: var(--space-1);
+}
+
+.onboarding-subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  margin-top: var(--space-2);
+  text-align: left;
+}
+
+.onboarding-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 0.5px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.step-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.step-icon svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary);
+}
+
+.step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.step-text strong {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.step-text span {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.onboarding-btn {
+  width: 100%;
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border-radius: var(--radius-lg);
+  border: none;
+  margin-top: var(--space-3);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.onboarding-btn:active {
+  opacity: 0.85;
+  transform: scale(0.98);
+}
+
+.onboarding-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-top: var(--space-1);
+  font-style: italic;
+}
+
+/* ============================================
    APP SHELL
    ============================================ */
 .app {
@@ -203,6 +342,19 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.header-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
 }
 
 .app-title {
