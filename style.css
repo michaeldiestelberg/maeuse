@@ -189,6 +189,12 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   transition: opacity 0.4s var(--ease-out);
 }
 
+.onboarding-pref-hidden .onboarding {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .onboarding.hidden {
   opacity: 0;
   pointer-events: none;
@@ -288,6 +294,27 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   line-height: 1.4;
 }
 
+.onboarding-preference {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.onboarding-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+}
+
 .onboarding-btn {
   width: 100%;
   padding: var(--space-3) var(--space-6);
@@ -297,7 +324,6 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   font-weight: 600;
   border-radius: var(--radius-lg);
   border: none;
-  margin-top: var(--space-3);
   transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
 
@@ -380,6 +406,11 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   transition: background var(--transition-fast);
 }
 
+.icon-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  outline-offset: 2px;
+}
+
 .icon-btn:active {
   background: var(--color-input-bg);
 }
@@ -387,6 +418,24 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 .icon-btn svg {
   width: 20px;
   height: 20px;
+}
+
+.icon-btn-muted {
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-tertiary);
+  opacity: 0.62;
+}
+
+.icon-btn-muted svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-btn-muted:focus-visible,
+.icon-btn-muted:active {
+  color: var(--color-text-secondary);
+  opacity: 1;
 }
 
 /* ============================================

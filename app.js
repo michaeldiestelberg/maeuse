@@ -195,59 +195,103 @@
   })();
 
   // ==================== ONBOARDING ====================
+  const ONBOARDING_PREFERENCE_KEY = 'maeuse:onboarding-hidden';
   const onboardingEl = $('#onboarding');
+  const onboardingSkipCheckbox = $('#onboardingSkip');
   const onboardingStartBtn = $('#onboardingStart');
   const aboutBtn = $('#aboutBtn');
-  let onboardingSeen = false;
+  let onboardingHideTimer = null;
+  let onboardingPreferenceFallback = null;
 
-  function showOnboarding() {
-    onboardingEl.classList.remove('hidden');
+  function readOnboardingPreference() {
+    try {
+      const value = window.localStorage.getItem(ONBOARDING_PREFERENCE_KEY);
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    } catch (e) {
+      // Ignore storage access failures and fall back gracefully.
+    }
+    return onboardingPreferenceFallback;
   }
 
-  function hideOnboarding() {
+  function writeOnboardingPreference(shouldHideOnLaunch) {
+    onboardingPreferenceFallback = shouldHideOnLaunch;
+
+    try {
+      window.localStorage.setItem(ONBOARDING_PREFERENCE_KEY, shouldHideOnLaunch ? 'true' : 'false');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setOnboardingMode(mode) {
+    onboardingStartBtn.textContent = mode === 'revisit' ? 'Back to App' : 'Get Started';
+  }
+
+  function showOnboarding() {
+    clearTimeout(onboardingHideTimer);
+    document.documentElement.classList.remove('onboarding-pref-hidden');
+    onboardingEl.style.display = '';
+    requestAnimationFrame(() => {
+      onboardingEl.classList.remove('hidden');
+    });
+  }
+
+  function hideOnboarding(immediate) {
+    clearTimeout(onboardingHideTimer);
     onboardingEl.classList.add('hidden');
-    // Remove from DOM after transition
-    setTimeout(() => {
+
+    if (immediate) {
+      onboardingEl.style.display = 'none';
+      return;
+    }
+
+    onboardingHideTimer = setTimeout(() => {
       if (onboardingEl.classList.contains('hidden')) {
         onboardingEl.style.display = 'none';
       }
     }, 500);
   }
 
+  function openOnboarding(mode) {
+    const storedPreference = readOnboardingPreference();
+    setOnboardingMode(mode);
+    onboardingSkipCheckbox.checked = storedPreference === null ? true : storedPreference;
+    showOnboarding();
+  }
+
   function checkOnboarding() {
-    // Use IndexedDB-based flag if available, otherwise always show in memory mode
-    if (useMemoryFallback) {
-      // In memory mode, show onboarding on every load (no persistence)
-      showOnboarding();
+    const storedPreference = readOnboardingPreference();
+
+    if (storedPreference !== null) {
+      onboardingSkipCheckbox.checked = storedPreference;
+      if (storedPreference) {
+        hideOnboarding(true);
+      } else {
+        openOnboarding('initial');
+      }
       return;
     }
-    // Check a simple flag in IndexedDB
-    try {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const req = tx.objectStore(STORE_NAME).getAll();
-      req.onsuccess = () => {
-        // If user has any expenses, they've used the app before
-        if (req.result && req.result.length > 0) {
-          onboardingSeen = true;
-          onboardingEl.style.display = 'none';
-        } else {
-          showOnboarding();
-        }
-      };
-      req.onerror = () => { showOnboarding(); };
-    } catch (e) {
-      showOnboarding();
+
+    if (expenses.length > 0) {
+      writeOnboardingPreference(true);
+      onboardingSkipCheckbox.checked = true;
+      hideOnboarding(true);
+      return;
     }
+
+    onboardingSkipCheckbox.checked = true;
+    openOnboarding('initial');
   }
 
   onboardingStartBtn.addEventListener('click', () => {
-    onboardingSeen = true;
+    writeOnboardingPreference(onboardingSkipCheckbox.checked);
     hideOnboarding();
   });
 
   aboutBtn.addEventListener('click', () => {
-    onboardingEl.style.display = '';
-    showOnboarding();
+    openOnboarding('revisit');
   });
 
   // ==================== MONTH NAVIGATION ====================
