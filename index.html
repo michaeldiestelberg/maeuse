@@ -21,11 +21,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Mäuse">
 <meta name="theme-color" content="#01696f">
-<link rel="apple-touch-icon" href="./assets/icon-180.png">
+<link rel="apple-touch-icon" sizes="76x76" href="./assets/icon-76.png">
+<link rel="apple-touch-icon" sizes="120x120" href="./assets/icon-120.png">
+<link rel="apple-touch-icon" sizes="152x152" href="./assets/icon-152.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./assets/icon-180.png">
 <link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/svg+xml" href="./assets/logo.svg">
 <link rel="icon" type="image/png" href="./assets/icon-192.png">
 
 <title>Mäuse</title>
@@ -52,25 +57,7 @@
   <div class="onboarding" id="onboarding">
     <div class="onboarding-content">
       <div class="onboarding-logo">
-        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="80" height="80" rx="18" fill="url(#logo-grad)"/>
-          <circle cx="28" cy="24" r="11" stroke="white" stroke-width="3" fill="none"/>
-          <circle cx="52" cy="24" r="11" stroke="white" stroke-width="3" fill="none"/>
-          <circle cx="40" cy="42" r="18" fill="white"/>
-          <circle cx="35" cy="38" r="2.5" fill="#01696f"/>
-          <circle cx="45" cy="38" r="2.5" fill="#01696f"/>
-          <path d="M38.5 44.5 L40 46.5 L41.5 44.5 Z" fill="#01696f"/>
-          <line x1="22" y1="43" x2="32" y2="44" stroke="#01696f" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="22" y1="47" x2="32" y2="46" stroke="#01696f" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="58" y1="43" x2="48" y2="44" stroke="#01696f" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="58" y1="47" x2="48" y2="46" stroke="#01696f" stroke-width="1.2" stroke-linecap="round"/>
-          <defs>
-            <linearGradient id="logo-grad" x1="0" y1="0" x2="80" y2="80">
-              <stop offset="0%" stop-color="#01696f"/>
-              <stop offset="100%" stop-color="#5ac8cd"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img src="./assets/logo.svg" alt="">
       </div>
       <h1 class="onboarding-title">Mäuse</h1>
       <p class="onboarding-subtitle">Split expenses with your partner, effortlessly.</p>
@@ -125,27 +112,19 @@
   <header class="app-header" id="appHeader">
     <div class="header-row">
       <div class="header-brand">
-        <svg class="header-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="7.2" fill="url(#hdr-grad)"/>
-          <circle cx="11.2" cy="9.6" r="4.4" stroke="white" stroke-width="1.2" fill="none"/>
-          <circle cx="20.8" cy="9.6" r="4.4" stroke="white" stroke-width="1.2" fill="none"/>
-          <circle cx="16" cy="16.8" r="7.2" fill="white"/>
-          <circle cx="14" cy="15.2" r="1" fill="#01696f"/>
-          <circle cx="18" cy="15.2" r="1" fill="#01696f"/>
-          <path d="M15.4 17.8 L16 18.6 L16.6 17.8 Z" fill="#01696f"/>
-          <defs>
-            <linearGradient id="hdr-grad" x1="0" y1="0" x2="32" y2="32">
-              <stop offset="0%" stop-color="#01696f"/>
-              <stop offset="100%" stop-color="#5ac8cd"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img class="header-logo" src="./assets/logo.svg" alt="">
         <h1 class="app-title">Mäuse</h1>
       </div>
       <div class="header-actions">
         <button class="icon-btn icon-btn-muted" id="aboutBtn" aria-label="Open welcome screen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </button>
+        <button class="icon-btn icon-btn-muted" id="settingsBtn" aria-label="Open settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 8.92 4.6H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c0 .66.39 1.26 1 1.51H21a2 2 0 0 1 0 4h-.09c-.61.25-1 .85-1 1.49Z"/>
           </svg>
         </button>
         <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode">
@@ -163,6 +142,10 @@
       <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
     </svg>
     <span>Preview mode — data won't persist. Install as an app for full functionality.</span>
+  </div>
+  <div class="update-notice" id="updateNotice" aria-live="polite">
+    <span>A new version is ready.</span>
+    <button class="update-notice-btn" id="updateReloadBtn" type="button">Reload</button>
   </div>
 
   <!-- ==================== MAIN VIEW ==================== -->
@@ -254,6 +237,34 @@
     <div class="delete-row" id="deleteRow" style="display:none;">
       <button class="delete-btn" id="deleteBtn">Delete Expense</button>
     </div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="settingsOverlay"></div>
+<div class="sheet settings-sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <span class="sheet-header-spacer" aria-hidden="true"></span>
+    <span class="sheet-title" id="settingsTitle">Settings</span>
+    <button class="sheet-action-btn" id="settingsDone" type="button">Done</button>
+  </div>
+  <div class="sheet-body">
+    <section class="settings-section">
+      <div class="settings-card">
+        <div class="settings-card-copy">
+          <span class="settings-kicker">Data</span>
+          <h2 class="settings-card-title">Backup & Restore</h2>
+          <p class="settings-card-text">Export your expenses to a JSON backup or import one on another device.</p>
+        </div>
+        <div class="settings-actions">
+          <button class="settings-btn settings-btn-primary" id="exportDataBtn" type="button">Export Backup</button>
+          <button class="settings-btn" id="importDataBtn" type="button">Import Backup</button>
+        </div>
+        <p class="settings-note">Import replaces the expenses stored on this device after confirmation.</p>
+        <p class="settings-status" id="settingsStatus" hidden aria-live="polite"></p>
+        <input id="importFileInput" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
   </div>
 </div>
 

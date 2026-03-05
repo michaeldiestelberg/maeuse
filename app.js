@@ -101,11 +101,33 @@
     });
   }
 
+  function dbReplaceAll(nextExpenses) {
+    if (useMemoryFallback) {
+      memoryStore = nextExpenses.map(expense => ({ ...expense }));
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      store.clear();
+      nextExpenses.forEach(expense => {
+        store.put(expense);
+      });
+      tx.oncomplete = () => resolve();
+      tx.onabort = (e) => reject(e.target.error || new Error('Failed to replace expenses.'));
+      tx.onerror = (e) => reject(e.target.error);
+    });
+  }
+
   // ==================== STATE ====================
   let expenses = [];
   let currentYear = new Date().getFullYear();
   let currentMonth = new Date().getMonth(); // 0-indexed
   let editingId = null;
+  let swRegistration = null;
+  let swRefreshPending = false;
+  let swUpdateIntervalId = null;
+  let settingsBusy = false;
 
   // ==================== DOM REFS ====================
   const $ = (sel) => document.querySelector(sel);
@@ -114,6 +136,17 @@
   const partnerAmountEl = $('#partnerAmount');
   const expenseListEl = $('#expenseList');
   const addBtn = $('#addBtn');
+  const memoryWarning = $('#memoryWarning');
+  const updateNotice = $('#updateNotice');
+  const updateReloadBtn = $('#updateReloadBtn');
+  const settingsBtn = $('#settingsBtn');
+  const settingsOverlay = $('#settingsOverlay');
+  const settingsSheet = $('#settingsSheet');
+  const settingsDone = $('#settingsDone');
+  const exportDataBtn = $('#exportDataBtn');
+  const importDataBtn = $('#importDataBtn');
+  const importFileInput = $('#importFileInput');
+  const settingsStatus = $('#settingsStatus');
   const sheetOverlay = $('#sheetOverlay');
   const sheet = $('#sheet');
   const sheetTitle = $('#sheetTitle');
@@ -155,6 +188,15 @@
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
+  }
+
+  function isValidDateString(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const year = Number(value.slice(0, 4));
+    const month = Number(value.slice(5, 7));
+    const day = Number(value.slice(8, 10));
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
   }
 
   function parseAmount(str) {
@@ -501,6 +543,180 @@
     });
   }
 
+  // ==================== SETTINGS ====================
+  function setSettingsStatus(message, tone) {
+    if (!settingsStatus) return;
+    settingsStatus.hidden = !message;
+    settingsStatus.textContent = message || '';
+    settingsStatus.className = tone ? 'settings-status is-' + tone : 'settings-status';
+  }
+
+  function setSettingsBusy(isBusy) {
+    settingsBusy = isBusy;
+    if (exportDataBtn) exportDataBtn.disabled = isBusy;
+    if (importDataBtn) importDataBtn.disabled = isBusy;
+    if (settingsDone) settingsDone.disabled = isBusy;
+  }
+
+  function openSettingsSheet() {
+    if (!settingsOverlay || !settingsSheet) return;
+    setSettingsStatus('', '');
+    settingsOverlay.classList.add('open');
+    settingsSheet.classList.add('open');
+  }
+
+  function closeSettingsSheet() {
+    if (settingsBusy) return;
+    if (settingsOverlay) settingsOverlay.classList.remove('open');
+    if (settingsSheet) settingsSheet.classList.remove('open');
+    if (importFileInput) importFileInput.value = '';
+  }
+
+  function getBackupFileName() {
+    return 'maeuse-backup-' + todayISO() + '.json';
+  }
+
+  function createBackupPayload() {
+    const sortedExpenses = [...expenses]
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.updatedAt || 0) - (b.updatedAt || 0) || a.id.localeCompare(b.id))
+      .map(expense => ({ ...expense }));
+
+    return {
+      app: 'Mäuse',
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      expenses: sortedExpenses
+    };
+  }
+
+  function exportBackup() {
+    try {
+      setSettingsBusy(true);
+      const blob = new Blob([JSON.stringify(createBackupPayload(), null, 2)], { type: 'application/json' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = getBackupFileName();
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setSettingsStatus('Backup created. Save or share the JSON file if your device asks.', 'success');
+    } catch (error) {
+      setSettingsStatus('Backup could not be created on this device.', 'error');
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  function sanitizeImportedExpense(rawExpense, index) {
+    if (!rawExpense || typeof rawExpense !== 'object') return null;
+
+    const amount = Number(rawExpense.amount);
+    const splitValue = Number(rawExpense.splitValue);
+    const date = typeof rawExpense.date === 'string' ? rawExpense.date : '';
+    const splitMode = rawExpense.splitMode === 'fixed'
+      ? 'fixed'
+      : rawExpense.splitMode === 'percent'
+        ? 'percent'
+        : null;
+
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (!Number.isFinite(splitValue) || !splitMode || !isValidDateString(date)) return null;
+
+    const updatedAt = Number(rawExpense.updatedAt);
+    return {
+      id: typeof rawExpense.id === 'string' && rawExpense.id.trim() ? rawExpense.id.trim() : uid() + '-' + index,
+      amount: Math.round(amount * 100) / 100,
+      description: typeof rawExpense.description === 'string' ? rawExpense.description.trim() : '',
+      date,
+      splitMode,
+      splitValue: splitMode === 'percent'
+        ? Math.min(Math.max(Math.round(splitValue * 100) / 100, 0), 100)
+        : Math.max(Math.round(splitValue * 100) / 100, 0),
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now()
+    };
+  }
+
+  function extractImportExpenses(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === 'object' && Array.isArray(payload.expenses)) return payload.expenses;
+    return null;
+  }
+
+  function focusLatestExpenseMonth(nextExpenses) {
+    if (!nextExpenses.length) {
+      const now = new Date();
+      currentYear = now.getFullYear();
+      currentMonth = now.getMonth();
+      return;
+    }
+
+    const latestExpense = [...nextExpenses]
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.updatedAt || 0) - (a.updatedAt || 0) || b.id.localeCompare(a.id))[0];
+    const latestDate = new Date(latestExpense.date + 'T00:00:00');
+    currentYear = latestDate.getFullYear();
+    currentMonth = latestDate.getMonth();
+  }
+
+  async function importBackupFile(file) {
+    if (!file) return;
+
+    try {
+      setSettingsBusy(true);
+      setSettingsStatus('Checking backup…', 'info');
+
+      const parsed = JSON.parse(await file.text());
+      const rawExpenses = extractImportExpenses(parsed);
+
+      if (!rawExpenses) {
+        throw new Error('This file is not a supported Mäuse backup.');
+      }
+
+      const importedExpenses = rawExpenses
+        .map((expense, index) => sanitizeImportedExpense(expense, index))
+        .filter(Boolean);
+
+      if (rawExpenses.length > 0 && importedExpenses.length === 0) {
+        throw new Error('No valid expenses were found in this backup.');
+      }
+
+      const dedupedExpenses = Array.from(new Map(importedExpenses.map(expense => [expense.id, expense])).values());
+      const confirmMessage = dedupedExpenses.length === 0
+        ? 'Import this empty backup? This will remove all expenses on this device.'
+        : 'Import ' + dedupedExpenses.length + ' expense' + (dedupedExpenses.length === 1 ? '' : 's') + '? This replaces the data currently stored on this device.';
+
+      if (!window.confirm(confirmMessage)) {
+        setSettingsStatus('Import cancelled.', 'info');
+        return;
+      }
+
+      await dbReplaceAll(dedupedExpenses);
+      expenses = dedupedExpenses;
+      focusLatestExpenseMonth(expenses);
+      updateMonthLabel();
+      renderList();
+
+      if (expenses.length > 0) {
+        writeOnboardingPreference(true);
+        onboardingSkipCheckbox.checked = true;
+        hideOnboarding(true);
+      }
+
+      setSettingsStatus(
+        expenses.length === 0
+          ? 'Backup imported. This device now has no saved expenses.'
+          : 'Imported ' + expenses.length + ' expense' + (expenses.length === 1 ? '' : 's') + '.',
+        'success'
+      );
+    } catch (error) {
+      setSettingsStatus(error && error.message ? error.message : 'Import failed. Please use a Mäuse backup JSON file.', 'error');
+    } finally {
+      setSettingsBusy(false);
+      if (importFileInput) importFileInput.value = '';
+    }
+  }
+
   // ==================== SPLIT CALC ====================
   function updateSplitResult() {
     const amount = parseAmount(inputAmount.value);
@@ -528,6 +744,24 @@
   sheetCancel.addEventListener('click', closeSheet);
   sheetSave.addEventListener('click', saveExpense);
   deleteBtn.addEventListener('click', deleteExpense);
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettingsSheet);
+  if (settingsOverlay) settingsOverlay.addEventListener('click', closeSettingsSheet);
+  if (settingsDone) settingsDone.addEventListener('click', closeSettingsSheet);
+  if (exportDataBtn) exportDataBtn.addEventListener('click', exportBackup);
+  if (importDataBtn) {
+    importDataBtn.addEventListener('click', () => {
+      setSettingsStatus('', '');
+      if (!importFileInput) return;
+      importFileInput.value = '';
+      importFileInput.click();
+    });
+  }
+  if (importFileInput) {
+    importFileInput.addEventListener('change', () => {
+      const file = importFileInput.files && importFileInput.files[0];
+      importBackupFile(file);
+    });
+  }
 
   todayBtn.addEventListener('click', () => {
     inputDate.value = todayISO();
@@ -589,10 +823,98 @@
   });
 
   // ==================== SERVICE WORKER ====================
-  // Only register in contexts that support it (not sandboxed iframes)
+  function showUpdateNotice(registration) {
+    swRegistration = registration;
+    if (!updateNotice || !updateReloadBtn) return;
+    updateReloadBtn.disabled = false;
+    updateReloadBtn.textContent = 'Reload';
+    updateNotice.classList.add('visible');
+  }
+
+  function hideUpdateNotice() {
+    if (!updateNotice || !updateReloadBtn) return;
+    updateNotice.classList.remove('visible');
+    updateReloadBtn.disabled = false;
+    updateReloadBtn.textContent = 'Reload';
+  }
+
+  function triggerServiceWorkerUpdate() {
+    if (!swRegistration) return;
+    swRegistration.update().catch(() => {});
+  }
+
+  function bindServiceWorkerUpdates(registration) {
+    swRegistration = registration;
+
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      showUpdateNotice(registration);
+    }
+
+    registration.addEventListener('updatefound', () => {
+      const installingWorker = registration.installing;
+      if (!installingWorker) return;
+
+      installingWorker.addEventListener('statechange', () => {
+        if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          showUpdateNotice(registration);
+        }
+      });
+    });
+
+    if (!swUpdateIntervalId) {
+      swUpdateIntervalId = window.setInterval(triggerServiceWorkerUpdate, 60 * 60 * 1000);
+    }
+  }
+
+  if (updateReloadBtn) {
+    updateReloadBtn.addEventListener('click', () => {
+      if (!swRegistration) {
+        window.location.reload();
+        return;
+      }
+
+      const waitingWorker = swRegistration.waiting;
+      updateReloadBtn.disabled = true;
+      updateReloadBtn.textContent = 'Reloading...';
+
+      if (waitingWorker) {
+        waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+        return;
+      }
+
+      triggerServiceWorkerUpdate();
+      window.setTimeout(() => {
+        if (updateReloadBtn.disabled) {
+          window.location.reload();
+        }
+      }, 1000);
+    });
+  }
+
   try {
     if ('serviceWorker' in navigator && navigator.serviceWorker) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      const hadServiceWorkerController = !!navigator.serviceWorker.controller;
+
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadServiceWorkerController) return;
+        if (swRefreshPending) return;
+        swRefreshPending = true;
+        hideUpdateNotice();
+        window.location.reload();
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          triggerServiceWorkerUpdate();
+        }
+      });
+
+      window.addEventListener('online', triggerServiceWorkerUpdate);
+
+      navigator.serviceWorker.register('./sw.js').then((registration) => {
+        bindServiceWorkerUpdates(registration);
+        triggerServiceWorkerUpdate();
+      }).catch(() => {});
     }
   } catch (e) {
     // Silently ignore — SW not available in this context
@@ -600,8 +922,7 @@
 
   // ==================== PERSISTENCE WARNING ====================
   function showMemoryWarning() {
-    const banner = document.getElementById('memoryWarning');
-    if (banner) banner.classList.add('visible');
+    if (memoryWarning) memoryWarning.classList.add('visible');
   }
 
   // ==================== INIT ====================
