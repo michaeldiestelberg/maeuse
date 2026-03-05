@@ -1,7 +1,8 @@
 {
   "name": "Mäuse",
   "short_name": "Mäuse",
-  "description": "Expense splitting tracker",
+  "lang": "en",
+  "description": "Split expenses with your partner, effortlessly.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f7f6f2",
