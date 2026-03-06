@@ -1,4 +1,4 @@
-const CACHE_NAME = 'maeuse-v5';
+const CACHE_NAME = 'maeuse-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -41,7 +41,39 @@ self.addEventListener('message', e => {
 });
 
 self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
-  );
+  if (e.request.method !== 'GET') return;
+
+  const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  e.respondWith(networkFirst(e.request));
 });
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+
+    if (response && response.ok) {
+      cache.put(request, response.clone());
+    }
+
+    return response;
+  } catch (error) {
+    const cachedResponse = await cache.match(request, {
+      ignoreSearch: request.mode === 'navigate'
+    });
+
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+
+    if (request.mode === 'navigate') {
+      const appShell = await cache.match('./index.html');
+      if (appShell) return appShell;
+    }
+
+    throw error;
+  }
+}

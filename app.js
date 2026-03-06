@@ -17,6 +17,14 @@
   // OpenAI's current docs recommend gpt-4o-mini-transcribe for best results.
   const VOICE_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
   const VOICE_EXTRACT_DEBOUNCE_MS = 400;
+  const APP_ASSET_SIGNATURES_KEY = 'maeuse:asset-signatures:v1';
+  const APP_UPDATE_ASSETS = [
+    './index.html',
+    './style.css',
+    './app.js',
+    './voice-utils.js',
+    './manifest.json'
+  ];
   const VOICE_TRANSCRIPTION_PROMPT = [
     'Expense dictation for the Mäuse expense tracker.',
     'Expect euros, cents, dates, mixed German and English, grocery stores, restaurants, and partner aliases like wife, husband, spouse, and partner.',
@@ -38,6 +46,8 @@
   let swRegistration = null;
   let swRefreshPending = false;
   let swUpdateIntervalId = null;
+  let assetUpdateCheckPromise = null;
+  let assetReloadPending = false;
   let settingsBusy = false;
   let onboardingHideTimer = null;
   let onboardingPreferenceFallback = null;
@@ -2058,6 +2068,106 @@
     swRegistration.update().catch(function () {});
   }
 
+  function readAssetSignatures() {
+    try {
+      const raw = window.localStorage.getItem(APP_ASSET_SIGNATURES_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writeAssetSignatures(signatures) {
+    try {
+      window.localStorage.setItem(APP_ASSET_SIGNATURES_KEY, JSON.stringify(signatures));
+    } catch (error) {}
+  }
+
+  async function fetchAssetSignature(url) {
+    let response = null;
+
+    try {
+      response = await fetch(url, {
+        method: 'HEAD',
+        cache: 'no-store'
+      });
+    } catch (error) {}
+
+    if (!response || !response.ok) {
+      response = await fetch(url, { cache: 'no-store' });
+    }
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch asset signature for ' + url);
+    }
+
+    return [
+      response.headers.get('etag') || '',
+      response.headers.get('last-modified') || '',
+      response.headers.get('content-length') || ''
+    ].join('|');
+  }
+
+  async function collectAssetSignatures() {
+    const entries = await Promise.all(APP_UPDATE_ASSETS.map(async function (url) {
+      return [url, await fetchAssetSignature(url)];
+    }));
+
+    return Object.fromEntries(entries);
+  }
+
+  function haveAssetSignaturesChanged(previous, next) {
+    if (!previous) return false;
+
+    return APP_UPDATE_ASSETS.some(function (url) {
+      return previous[url] && next[url] && previous[url] !== next[url];
+    });
+  }
+
+  function canReloadForAssetUpdate() {
+    if (sheet && sheet.classList.contains('open')) return false;
+    if (voiceSheet && voiceSheet.classList.contains('open')) return false;
+    if (settingsSheet && settingsSheet.classList.contains('open')) return false;
+    return true;
+  }
+
+  function handleAssetUpdateDetected(signatures) {
+    writeAssetSignatures(signatures);
+
+    if (assetReloadPending) return;
+    assetReloadPending = true;
+
+    if (canReloadForAssetUpdate()) {
+      window.location.reload();
+      return;
+    }
+
+    showUpdateNotice(swRegistration);
+  }
+
+  function checkForAssetUpdates() {
+    if (assetReloadPending) return Promise.resolve();
+    if (assetUpdateCheckPromise) return assetUpdateCheckPromise;
+
+    assetUpdateCheckPromise = collectAssetSignatures()
+      .then(function (signatures) {
+        const previous = readAssetSignatures();
+
+        if (haveAssetSignaturesChanged(previous, signatures)) {
+          handleAssetUpdateDetected(signatures);
+          return;
+        }
+
+        writeAssetSignatures(signatures);
+      })
+      .catch(function () {})
+      .finally(function () {
+        assetUpdateCheckPromise = null;
+      });
+
+    return assetUpdateCheckPromise;
+  }
+
   function bindServiceWorkerUpdates(registration) {
     swRegistration = registration;
 
@@ -2353,14 +2463,19 @@
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
           triggerServiceWorkerUpdate();
+          checkForAssetUpdates();
         }
       });
 
-      window.addEventListener('online', triggerServiceWorkerUpdate);
+      window.addEventListener('online', function () {
+        triggerServiceWorkerUpdate();
+        checkForAssetUpdates();
+      });
 
       navigator.serviceWorker.register('./sw.js').then(function (registration) {
         bindServiceWorkerUpdates(registration);
         triggerServiceWorkerUpdate();
+        checkForAssetUpdates();
       }).catch(function () {});
     }
   } catch (error) {
