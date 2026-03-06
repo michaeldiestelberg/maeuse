@@ -8,6 +8,7 @@
 
 /* --- Fluid Type Scale --- */
 :root {
+  --app-max-width: 480px;
   --text-xs:   clamp(0.6875rem, 0.65rem + 0.2vw, 0.75rem);
   --text-sm:   clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem);
   --text-base: clamp(0.9375rem, 0.9rem + 0.2vw, 1rem);
@@ -167,9 +168,14 @@ body {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
+  overflow: hidden;
 }
 
-html { height: -webkit-fill-available; }
+html {
+  height: 100%;
+  height: -webkit-fill-available;
+  overflow: hidden;
+}
 
 input, button, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-color: transparent; }
@@ -345,9 +351,11 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
    APP SHELL
    ============================================ */
 .app {
-  max-width: 430px;
+  max-width: var(--app-max-width);
   margin: 0 auto;
+  height: 100dvh;
   min-height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -520,6 +528,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   display: none;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
 }
 
 .view.active {
@@ -620,6 +629,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
    ============================================ */
 .expense-list-section {
   flex: 1;
+  min-height: 0;
   padding: 0 var(--space-5) var(--space-5);
   padding-bottom: calc(var(--space-5) + 80px);
   overflow-y: auto;
@@ -752,7 +762,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 .fab-stack {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 16px) + var(--space-5));
-  right: calc(50% - 215px + var(--space-5));
+  right: max(var(--space-5), calc((100vw - var(--app-max-width)) / 2 + var(--space-5)));
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -772,7 +782,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-@media (max-width: 430px) {
+@media (max-width: 480px) {
   .fab-stack {
     right: var(--space-5);
   }
@@ -822,7 +832,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   left: 50%;
   transform: translateX(-50%) translateY(100%);
   width: 100%;
-  max-width: 430px;
+  max-width: var(--app-max-width);
   max-height: 92dvh;
   background: var(--color-surface-elevated);
   backdrop-filter: saturate(180%) blur(40px);
@@ -1549,19 +1559,6 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-}
-
-/* Attribution footer */
-.attribution {
-  text-align: center;
-  padding: var(--space-4) var(--space-5);
-  padding-bottom: calc(env(safe-area-inset-bottom, 8px) + var(--space-4));
-}
-
-.attribution a {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-  text-decoration: none;
 }
 
 /* ============================================
