@@ -181,12 +181,22 @@
   </div>
 
   <!-- ==================== FAB ==================== -->
-  <button class="fab" id="addBtn" aria-label="Add expense">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19"/>
-      <line x1="5" y1="12" x2="19" y2="12"/>
-    </svg>
-  </button>
+  <div class="fab-stack" aria-label="Add expense actions">
+    <button class="fab fab-secondary" id="voiceBtn" aria-label="Add expense by voice">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3a3.25 3.25 0 0 1 3.25 3.25v5.5a3.25 3.25 0 1 1-6.5 0v-5.5A3.25 3.25 0 0 1 12 3Z"/>
+        <path d="M19 11.5a7 7 0 0 1-14 0"/>
+        <line x1="12" y1="18.5" x2="12" y2="21"/>
+        <line x1="8.5" y1="21" x2="15.5" y2="21"/>
+      </svg>
+    </button>
+    <button class="fab" id="addBtn" aria-label="Add expense manually">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </div>
 </div>
 
 <!-- ==================== ADD/EDIT SHEET ==================== -->
@@ -240,6 +250,55 @@
   </div>
 </div>
 
+<div class="sheet-overlay" id="voiceOverlay"></div>
+<div class="sheet voice-sheet" id="voiceSheet" role="dialog" aria-modal="true" aria-labelledby="voiceTitle">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="sheet-action-btn" id="voiceCancel" type="button">Cancel</button>
+    <span class="sheet-title" id="voiceTitle">Voice Expense</span>
+    <button class="sheet-action-btn" id="voiceDone" type="button" disabled>Done</button>
+  </div>
+  <div class="sheet-body voice-sheet-body">
+    <section class="voice-hero" aria-live="polite">
+      <button class="voice-mic-button" id="voiceMicToggle" type="button" aria-pressed="true" aria-label="Mute microphone">
+        <span class="voice-mic-glow" aria-hidden="true"></span>
+        <svg class="voice-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3a3.25 3.25 0 0 1 3.25 3.25v5.5a3.25 3.25 0 1 1-6.5 0v-5.5A3.25 3.25 0 0 1 12 3Z"/>
+          <path d="M19 11.5a7 7 0 0 1-14 0"/>
+          <line x1="12" y1="18.5" x2="12" y2="21"/>
+          <line x1="8.5" y1="21" x2="15.5" y2="21"/>
+          <line class="voice-mic-slash" x1="5.5" y1="5.5" x2="18.5" y2="18.5"/>
+        </svg>
+      </button>
+      <p class="voice-session-status" id="voiceSessionStatus">Connecting…</p>
+      <p class="voice-sheet-status" id="voiceSheetStatus" hidden></p>
+    </section>
+    <section class="voice-preview-grid">
+      <article class="voice-preview-card">
+        <span class="voice-preview-label">Amount</span>
+        <strong class="voice-preview-value" id="voiceAmountValue">Waiting…</strong>
+        <span class="voice-preview-hint" id="voiceAmountHint">Say the total amount</span>
+      </article>
+      <article class="voice-preview-card">
+        <span class="voice-preview-label">Description</span>
+        <strong class="voice-preview-value" id="voiceDescriptionValue">Optional</strong>
+        <span class="voice-preview-hint" id="voiceDescriptionHint">Store, merchant, or note</span>
+      </article>
+      <article class="voice-preview-card">
+        <span class="voice-preview-label">Date</span>
+        <strong class="voice-preview-value" id="voiceDateValue">Today</strong>
+        <span class="voice-preview-hint" id="voiceDateHint">Defaults to today</span>
+      </article>
+      <article class="voice-preview-card">
+        <span class="voice-preview-label">Partner share</span>
+        <strong class="voice-preview-value" id="voiceShareValue">50 %</strong>
+        <span class="voice-preview-hint" id="voiceShareHint">Defaults if you save now</span>
+      </article>
+    </section>
+    <button class="voice-manual-btn" id="voiceSwitchManual" type="button">Switch to manual</button>
+  </div>
+</div>
+
 <div class="sheet-overlay" id="settingsOverlay"></div>
 <div class="sheet settings-sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="sheet-handle"></div>
@@ -265,6 +324,34 @@
         <input id="importFileInput" type="file" accept="application/json,.json" hidden>
       </div>
     </section>
+    <section class="settings-section">
+      <div class="settings-card settings-card-voice" id="voiceSettingsCard">
+        <div class="settings-card-copy">
+          <span class="settings-kicker">Voice</span>
+          <h2 class="settings-card-title">Voice Mode</h2>
+          <p class="settings-card-text">Enable a real-time voice capture sheet that fills the expense cards as you speak.</p>
+        </div>
+        <div class="settings-form">
+          <label class="settings-field" for="voiceApiKey">
+            <span class="settings-field-label">OpenAI API Key</span>
+            <input type="password" class="form-input settings-input" id="voiceApiKey" placeholder="sk-..." autocomplete="off" autocapitalize="none" spellcheck="false">
+          </label>
+          <button class="settings-btn" id="voiceVerifyBtn" type="button">Verify Key</button>
+          <label class="settings-toggle" for="voiceEnabledToggle">
+            <span class="settings-toggle-copy">
+              <strong class="settings-toggle-title">Enable voice mode</strong>
+              <span class="settings-toggle-text">Shows the mic button and allows live voice capture.</span>
+            </span>
+            <span class="settings-switch">
+              <input type="checkbox" id="voiceEnabledToggle">
+              <span class="settings-switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
+        </div>
+        <p class="settings-note">Voice mode is online-only. Your API key stays on this device, is excluded from backups, and is only used for OpenAI voice requests.</p>
+        <p class="settings-status" id="voiceSettingsStatus" hidden aria-live="polite"></p>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -272,6 +359,7 @@
   <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
 </div>
 
+<script src="./voice-utils.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

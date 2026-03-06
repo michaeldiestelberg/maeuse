@@ -1,9 +1,10 @@
-const CACHE_NAME = 'maeuse-v4';
+const CACHE_NAME = 'maeuse-v5';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './voice-utils.js',
   './manifest.json',
   './assets/logo.svg',
   './assets/icon-76.png',
