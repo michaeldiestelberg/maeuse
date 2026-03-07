@@ -239,46 +239,101 @@
   <div class="sheet-header">
     <button class="sheet-action-btn" id="voiceCancel" type="button">Cancel</button>
     <span class="sheet-title" id="voiceTitle">Voice Expense</span>
-    <button class="sheet-action-btn" id="voiceDone" type="button" disabled>Done</button>
+    <span class="sheet-header-spacer" aria-hidden="true"></span>
   </div>
   <div class="sheet-body voice-sheet-body">
-    <section class="voice-hero" aria-live="polite">
-      <button class="voice-mic-button" id="voiceMicToggle" type="button" aria-pressed="true" aria-label="Mute microphone">
-        <span class="voice-mic-glow" aria-hidden="true"></span>
-        <svg class="voice-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 3a3.25 3.25 0 0 1 3.25 3.25v5.5a3.25 3.25 0 1 1-6.5 0v-5.5A3.25 3.25 0 0 1 12 3Z"/>
-          <path d="M19 11.5a7 7 0 0 1-14 0"/>
-          <line x1="12" y1="18.5" x2="12" y2="21"/>
-          <line x1="8.5" y1="21" x2="15.5" y2="21"/>
-          <line class="voice-mic-slash" x1="5.5" y1="5.5" x2="18.5" y2="18.5"/>
-        </svg>
-      </button>
-      <p class="voice-session-status" id="voiceSessionStatus">Connecting…</p>
+    <div class="voice-state-region">
+      <section class="voice-hero voice-state-panel" id="voiceHero" aria-live="polite">
+        <article class="voice-state-card voice-hero-card">
+          <button class="voice-mic-button" id="voiceMicToggle" type="button" aria-label="Start recording expense details">
+            <span class="voice-mic-glow" aria-hidden="true"></span>
+            <svg class="voice-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3a3.25 3.25 0 0 1 3.25 3.25v5.5a3.25 3.25 0 1 1-6.5 0v-5.5A3.25 3.25 0 0 1 12 3Z"/>
+              <path d="M19 11.5a7 7 0 0 1-14 0"/>
+              <line x1="12" y1="18.5" x2="12" y2="21"/>
+              <line x1="8.5" y1="21" x2="15.5" y2="21"/>
+              <line class="voice-mic-slash" x1="5.5" y1="5.5" x2="18.5" y2="18.5"/>
+            </svg>
+          </button>
+          <div class="voice-hero-copy">
+            <span class="voice-mic-label" id="voiceMicLabel">Start recording</span>
+            <span class="voice-mic-caption" id="voiceMicCaption">Speak one expense, then stop to process it</span>
+            <p class="voice-session-status" id="voiceSessionStatus">Record one expense and let AI turn it into a draft.</p>
+            <p class="voice-privacy-note" id="voicePrivacyNote">Audio is sent only after you stop recording.</p>
+          </div>
+        </article>
+      </section>
+      <section class="voice-processing-card voice-state-panel" id="voiceProcessingCard" hidden>
+        <div class="voice-processing-copy">
+          <span class="voice-processing-kicker">Processing</span>
+          <h3 class="voice-processing-title">Turning your recording into an expense</h3>
+        </div>
+        <ol class="voice-processing-steps">
+          <li class="voice-processing-step" id="voiceProcessingStepTranscription">
+            <span class="voice-processing-dot" aria-hidden="true"></span>
+            <span class="voice-processing-text">Transcribing audio</span>
+          </li>
+          <li class="voice-processing-step" id="voiceProcessingStepCleanup">
+            <span class="voice-processing-dot" aria-hidden="true"></span>
+            <span class="voice-processing-text">Cleaning transcript</span>
+          </li>
+          <li class="voice-processing-step" id="voiceProcessingStepExtraction">
+            <span class="voice-processing-dot" aria-hidden="true"></span>
+            <span class="voice-processing-text">Extracting expense</span>
+          </li>
+        </ol>
+      </section>
+      <section class="voice-error-card voice-state-panel" id="voiceErrorCard" hidden>
+        <span class="voice-error-kicker">Voice mode</span>
+        <h3 class="voice-error-title" id="voiceErrorTitle">Processing didn’t finish</h3>
+        <p class="voice-error-message" id="voiceErrorMessage">Try processing this recording again or switch to manual entry.</p>
+      </section>
+      <section class="voice-review-section voice-state-panel" id="voiceReviewSection" hidden>
+        <article class="voice-transcript-card">
+          <div class="voice-transcript-copy">
+            <div class="voice-transcript-copy-main">
+              <span class="voice-transcript-kicker">Cleaned transcript</span>
+              <p class="voice-transcript-hint">This is the exact text used for extraction.</p>
+            </div>
+            <button class="voice-transcript-toggle" id="voiceTranscriptToggle" type="button" hidden>Show more</button>
+          </div>
+          <p class="voice-transcript-text" id="voiceTranscriptValue">Waiting for processing…</p>
+        </article>
+        <article class="voice-summary-card">
+          <div class="voice-summary-grid">
+            <div class="voice-summary-item voice-summary-item-amount">
+              <span class="voice-summary-label">Amount</span>
+              <strong class="voice-summary-value voice-summary-value-amount" id="voiceAmountValue">Waiting…</strong>
+              <span class="voice-summary-hint" id="voiceAmountHint">Visible after processing</span>
+            </div>
+            <div class="voice-summary-item">
+              <span class="voice-summary-label">Partner share</span>
+              <strong class="voice-summary-value" id="voiceShareValue">Pending</strong>
+              <span class="voice-summary-hint" id="voiceShareHint">Visible after processing</span>
+            </div>
+            <div class="voice-summary-item">
+              <span class="voice-summary-label">Description</span>
+              <strong class="voice-summary-value" id="voiceDescriptionValue">Waiting…</strong>
+              <span class="voice-summary-hint" id="voiceDescriptionHint">Visible after processing</span>
+            </div>
+            <div class="voice-summary-item">
+              <span class="voice-summary-label">Date</span>
+              <strong class="voice-summary-value" id="voiceDateValue">Pending</strong>
+              <span class="voice-summary-hint" id="voiceDateHint">Visible after processing</span>
+            </div>
+          </div>
+        </article>
+      </section>
+    </div>
+    <section class="voice-footer">
       <p class="voice-sheet-status" id="voiceSheetStatus" hidden></p>
+      <section class="voice-actions" id="voiceActions">
+        <button class="voice-secondary-btn" id="voiceRecordAgain" type="button" hidden>Record again</button>
+        <button class="voice-secondary-btn" id="voiceRetryProcessing" type="button" hidden>Retry processing</button>
+        <button class="voice-manual-btn" id="voiceSwitchManual" type="button" hidden>Edit manually</button>
+        <button class="voice-primary-btn" id="voiceDone" type="button" disabled hidden>Save</button>
+      </section>
     </section>
-    <section class="voice-preview-grid">
-      <article class="voice-preview-card">
-        <span class="voice-preview-label">Amount</span>
-        <strong class="voice-preview-value" id="voiceAmountValue">Waiting…</strong>
-        <span class="voice-preview-hint" id="voiceAmountHint">Say the total amount</span>
-      </article>
-      <article class="voice-preview-card">
-        <span class="voice-preview-label">Description</span>
-        <strong class="voice-preview-value" id="voiceDescriptionValue">Optional</strong>
-        <span class="voice-preview-hint" id="voiceDescriptionHint">Store, merchant, or note</span>
-      </article>
-      <article class="voice-preview-card">
-        <span class="voice-preview-label">Date</span>
-        <strong class="voice-preview-value" id="voiceDateValue">Today</strong>
-        <span class="voice-preview-hint" id="voiceDateHint">Defaults to today</span>
-      </article>
-      <article class="voice-preview-card">
-        <span class="voice-preview-label">Partner share</span>
-        <strong class="voice-preview-value" id="voiceShareValue">50 %</strong>
-        <span class="voice-preview-hint" id="voiceShareHint">Defaults if you save now</span>
-      </article>
-    </section>
-    <button class="voice-manual-btn" id="voiceSwitchManual" type="button">Switch to manual</button>
   </div>
 </div>
 
@@ -312,7 +367,7 @@
         <div class="settings-card-copy">
           <span class="settings-kicker">Voice</span>
           <h2 class="settings-card-title">Voice Mode</h2>
-          <p class="settings-card-text">Enable a real-time voice capture sheet that fills the expense cards as you speak.</p>
+          <p class="settings-card-text">Enable a record-then-process voice sheet that turns one spoken expense into a reviewed draft.</p>
         </div>
         <div class="settings-form">
           <label class="settings-field" for="voiceApiKey">
@@ -323,7 +378,7 @@
           <label class="settings-toggle" for="voiceEnabledToggle">
             <span class="settings-toggle-copy">
               <strong class="settings-toggle-title">Enable voice mode</strong>
-              <span class="settings-toggle-text">Shows the mic button and allows live voice capture.</span>
+              <span class="settings-toggle-text">Shows the mic button and allows record-then-process voice capture.</span>
             </span>
             <span class="settings-switch">
               <input type="checkbox" id="voiceEnabledToggle">
@@ -331,7 +386,7 @@
             </span>
           </label>
         </div>
-        <p class="settings-note">Voice mode is online-only. Your API key stays on this device, is excluded from backups, and is only used for OpenAI voice requests.</p>
+        <p class="settings-note">Voice mode is online-only and needs access to OpenAI gpt-4o-transcribe and gpt-5.4. Your API key stays on this device, is excluded from backups, and is only used for OpenAI voice requests.</p>
         <p class="settings-status" id="voiceSettingsStatus" hidden aria-live="polite"></p>
       </div>
     </section>

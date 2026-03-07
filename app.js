@@ -13,10 +13,20 @@
 
   // ==================== VOICE CONFIG ====================
   const VOICE_SETTINGS_KEY = 'maeuse:voice-settings';
-  const VOICE_EXTRACT_MODEL = 'gpt-5-nano';
-  // OpenAI's current docs recommend gpt-4o-mini-transcribe for best results.
-  const VOICE_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
-  const VOICE_EXTRACT_DEBOUNCE_MS = 400;
+  const VOICE_DEBUG_STORAGE_KEY = 'maeuse:voice-debug';
+  const VOICE_DEBUG_MAX_ENTRIES = 250;
+  const VOICE_CLEANUP_MODEL = 'gpt-5.4';
+  const VOICE_CLEANUP_REASONING_EFFORT = 'low';
+  const VOICE_EXTRACT_MODEL = 'gpt-5.4';
+  const VOICE_EXTRACT_REASONING_EFFORT = 'none';
+  const VOICE_TRANSCRIPTION_MODEL = 'gpt-4o-transcribe';
+  const VOICE_MAX_RECORDING_MS = 45000;
+  const VOICE_TRANSCRIPT_COLLAPSE_THRESHOLD = 120;
+  const VOICE_RECORDING_MIME_TYPES = [
+    'audio/webm;codecs=opus',
+    'audio/mp4',
+    'audio/webm'
+  ];
   const APP_ASSET_SIGNATURES_KEY = 'maeuse:asset-signatures:v1';
   const APP_UPDATE_ASSETS = [
     './index.html',
@@ -26,12 +36,44 @@
     './manifest.json'
   ];
   const VOICE_TRANSCRIPTION_PROMPT = [
-    'Expense dictation for the Mäuse expense tracker.',
-    'Expect euros, cents, dates, mixed German and English, grocery stores, restaurants, and partner aliases like wife, husband, spouse, and partner.',
-    'Prefer merchant names exactly as spoken.'
+    'Expense dictation for a couples expense tracker.',
+    'The speaker may mix English and German.',
+    'Transcribe faithfully.',
+    'Preserve self-corrections, restarts, merchant names, euro amounts, cents, dates, percentages, and partner references.',
+    'Use normal punctuation.',
+    'Do not clean up meaning or resolve corrections.'
+  ].join(' ');
+  const VOICE_CLEANUP_PROMPT = [
+    'You convert one raw expense-dictation transcript into one cleaned transcript for user review and downstream extraction.',
+    'Output contract: return only the schema output. cleaned_transcript must be one concise natural utterance, or an empty string if the transcript is unusable.',
+    'Rules: preserve the final intended meaning exactly.',
+    'Remove filler words, hesitation noises, obvious false starts, and duplicated fragments that do not change meaning.',
+    'If the speaker corrects themselves, keep only the final intended value.',
+    'Preserve merchant names, euro amounts, cents, dates, split percentages, fixed split amounts, and partner references.',
+    'Do not invent facts, summarize, explain, or add metadata.',
+    'If the final intent is still ambiguous, keep the ambiguity in wording rather than inventing a value.',
+    'Done when the output is a single clean utterance suitable for user review and downstream extraction, all final actionable facts are preserved, and superseded false starts and corrections are removed.',
+    'Before finalizing, verify that every final merchant, amount, date, split, and partner fact still appears in the cleaned meaning.',
+    'If the raw transcript is unusable, return an empty cleaned_transcript.'
+  ].join(' ');
+  const VOICE_EXTRACT_PROMPT = [
+    'You extract one expense draft from one cleaned expense transcript.',
+    'The cleaned_transcript is the only semantic source of truth. Any earlier false starts or corrections were already resolved upstream.',
+    'Output contract: return only the schema output. Use null for unknown numeric/date fields and an empty string for unknown text fields.',
+    'Field rules: amount is the total expense in euros.',
+    'description is a concise merchant-and-purpose description when inferable, otherwise an empty string.',
+    'date_iso must be YYYY-MM-DD when explicitly inferable from cleaned_transcript relative to today_iso; otherwise null.',
+    'If the speaker gives a percentage split, set partner_share_mode to percent and partner_share_value to that percentage.',
+    'If the speaker gives a fixed partner amount, set partner_share_mode to fixed and partner_share_value to that euro amount.',
+    'Preserve spouse or partner wording in partner_alias only when it is relevant to the split.',
+    'If split details are absent or ambiguous, leave the split fields null.',
+    'Do not invent values.',
+    'Done when every explicit amount, date, split, and relevant partner reference from cleaned_transcript is either represented in the draft or intentionally left unknown because it is absent or ambiguous, the output fully matches the schema, and is_complete is true only if the draft is sensible to save after app defaults are applied.',
+    'Before finalizing, verify that amount is the total expense, not the partner share, that no superseded value has been reintroduced, and that the output satisfies the schema exactly.'
   ].join(' ');
 
   const voiceUtils = window.MaeuseVoiceUtils || {};
+  const voiceDebug = createVoiceDebugController();
 
   let db = null;
   let useMemoryFallback = false;
@@ -54,6 +96,7 @@
   let voiceSettings = loadVoiceSettings();
   let voiceDraft = createEmptyVoiceDraft(todayISO());
   let voiceSession = null;
+  let voiceTranscriptExpanded = false;
 
   // ==================== DOM REFS ====================
   const $ = function (selector) { return document.querySelector(selector); };
@@ -100,9 +143,23 @@
   const voiceSheet = $('#voiceSheet');
   const voiceCancel = $('#voiceCancel');
   const voiceDone = $('#voiceDone');
+  const voiceHero = $('#voiceHero');
   const voiceMicToggle = $('#voiceMicToggle');
+  const voiceMicLabel = $('#voiceMicLabel');
+  const voiceMicCaption = $('#voiceMicCaption');
   const voiceSessionStatus = $('#voiceSessionStatus');
   const voiceSheetStatus = $('#voiceSheetStatus');
+  const voicePrivacyNote = $('#voicePrivacyNote');
+  const voiceProcessingCard = $('#voiceProcessingCard');
+  const voiceProcessingStepTranscription = $('#voiceProcessingStepTranscription');
+  const voiceProcessingStepCleanup = $('#voiceProcessingStepCleanup');
+  const voiceProcessingStepExtraction = $('#voiceProcessingStepExtraction');
+  const voiceErrorCard = $('#voiceErrorCard');
+  const voiceErrorTitle = $('#voiceErrorTitle');
+  const voiceErrorMessage = $('#voiceErrorMessage');
+  const voiceReviewSection = $('#voiceReviewSection');
+  const voiceTranscriptValue = $('#voiceTranscriptValue');
+  const voiceTranscriptToggle = $('#voiceTranscriptToggle');
   const voiceAmountValue = $('#voiceAmountValue');
   const voiceAmountHint = $('#voiceAmountHint');
   const voiceDescriptionValue = $('#voiceDescriptionValue');
@@ -111,6 +168,8 @@
   const voiceDateHint = $('#voiceDateHint');
   const voiceShareValue = $('#voiceShareValue');
   const voiceShareHint = $('#voiceShareHint');
+  const voiceRecordAgain = $('#voiceRecordAgain');
+  const voiceRetryProcessing = $('#voiceRetryProcessing');
   const voiceSwitchManual = $('#voiceSwitchManual');
   const onboardingEl = $('#onboarding');
   const onboardingSkipCheckbox = $('#onboardingSkip');
@@ -368,8 +427,136 @@
       partnerShareValue: null,
       partnerAlias: '',
       confidence: { amount: 0, description: 0, date: 0, partnerShare: 0 },
+      defaultedFields: { date: false, partnerShare: false },
       isComplete: false,
       source: 'empty'
+    };
+  }
+
+  function createVoiceDebugController() {
+    const entries = [];
+    let enabled = readVoiceDebugPreference();
+
+    applyVoiceDebugQueryOverride();
+    publishVoiceDebugApi();
+
+    function applyVoiceDebugQueryOverride() {
+      let params;
+      try {
+        params = new URLSearchParams(window.location.search || '');
+      } catch (error) {
+        return;
+      }
+
+      const raw = params.get('voiceDebug');
+      if (raw === null) return;
+
+      enabled = isTruthyFlag(raw);
+      writeVoiceDebugPreference(enabled);
+    }
+
+    function readVoiceDebugPreference() {
+      try {
+        const raw = window.localStorage.getItem(VOICE_DEBUG_STORAGE_KEY);
+        return isTruthyFlag(raw);
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function writeVoiceDebugPreference(nextValue) {
+      try {
+        if (nextValue) {
+          window.localStorage.setItem(VOICE_DEBUG_STORAGE_KEY, 'true');
+        } else {
+          window.localStorage.removeItem(VOICE_DEBUG_STORAGE_KEY);
+        }
+      } catch (error) {}
+    }
+
+    function isTruthyFlag(value) {
+      if (typeof value !== 'string') return false;
+      const normalized = value.trim().toLowerCase();
+      return normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes';
+    }
+
+    function cloneDebugData(value) {
+      if (value === null || typeof value === 'undefined') return value;
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        return {
+          note: 'Debug payload could not be serialized cleanly.',
+          type: Object.prototype.toString.call(value)
+        };
+      }
+    }
+
+    function pushEntry(eventName, data) {
+      const entry = {
+        at: new Date().toISOString(),
+        event: eventName,
+        data: cloneDebugData(data)
+      };
+      entries.push(entry);
+      if (entries.length > VOICE_DEBUG_MAX_ENTRIES) {
+        entries.splice(0, entries.length - VOICE_DEBUG_MAX_ENTRIES);
+      }
+      return entry;
+    }
+
+    function publishVoiceDebugApi() {
+      window.MaeuseVoiceDebug = {
+        enable: function (persist) {
+          enabled = true;
+          if (persist !== false) {
+            writeVoiceDebugPreference(true);
+          }
+          console.info('Mäuse voice debug enabled.');
+          return enabled;
+        },
+        disable: function () {
+          enabled = false;
+          writeVoiceDebugPreference(false);
+          console.info('Mäuse voice debug disabled.');
+          return enabled;
+        },
+        clear: function () {
+          entries.length = 0;
+        },
+        getLogs: function () {
+          return entries.slice();
+        },
+        isEnabled: function () {
+          return enabled;
+        },
+        download: function () {
+          const blob = new Blob([JSON.stringify(entries, null, 2)], {
+            type: 'application/json'
+          });
+          const link = document.createElement('a');
+          const url = URL.createObjectURL(blob);
+          link.href = url;
+          link.download = 'maeuse-voice-debug-' + todayISO() + '.json';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.setTimeout(function () {
+            URL.revokeObjectURL(url);
+          }, 1000);
+        }
+      };
+    }
+
+    return {
+      log: function (eventName, data) {
+        if (!enabled) return;
+        const entry = pushEntry(eventName, data);
+        console.debug('[Maeuse voice]', eventName, entry.data);
+      },
+      isEnabled: function () {
+        return enabled;
+      }
     };
   }
 
@@ -380,73 +567,29 @@
     return createEmptyVoiceDraft(todayISO());
   }
 
-  function parseTranscriptDraft(transcript) {
-    if (voiceUtils.parseTranscriptDraft) {
-      return voiceUtils.parseTranscriptDraft(transcript, { todayIso: todayISO() });
+  function formatVoiceDuration(durationMs) {
+    if (voiceUtils.formatVoiceDuration) {
+      return voiceUtils.formatVoiceDuration(durationMs);
     }
-    return createEmptyVoiceDraft(todayISO());
+
+    const totalSeconds = Math.max(0, Math.floor(Number(durationMs || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes + ':' + String(seconds).padStart(2, '0');
   }
 
-  function mergeVoiceDrafts(baseDraft, incomingDraft) {
-    if (voiceUtils.mergeVoiceDraft) {
-      return voiceUtils.mergeVoiceDraft(baseDraft, incomingDraft);
-    }
-    return incomingDraft || baseDraft;
-  }
-
-  function resolveCommittedTurnOrder(commits) {
-    if (voiceUtils.resolveCommittedTurnOrder) {
-      return voiceUtils.resolveCommittedTurnOrder(commits);
-    }
-    return commits.map(function (commit) { return commit.itemId; });
-  }
-
-  function composeTranscriptText(order, textById) {
-    if (voiceUtils.composeTranscriptText) {
-      return voiceUtils.composeTranscriptText(order, textById);
-    }
-    return order.map(function (itemId) { return (textById[itemId] || '').trim(); }).filter(Boolean).join(' ').trim();
-  }
-
-  function getLatestVoiceTurnText(session) {
-    if (!session || !Array.isArray(session.order) || !session.order.length) return '';
-    const latestItemId = session.order[session.order.length - 1];
-    return typeof session.textsById[latestItemId] === 'string' ? session.textsById[latestItemId].trim() : '';
-  }
-
-  function getRecentVoiceTurns(session, limit) {
-    if (!session || !Array.isArray(session.order)) return [];
-    const startIndex = Math.max(session.order.length - limit, 0);
-
-    return session.order.slice(startIndex).map(function (itemId, offset) {
-      return {
-        order: startIndex + offset + 1,
-        text: typeof session.textsById[itemId] === 'string' ? session.textsById[itemId].trim() : ''
-      };
-    }).filter(function (turn) {
-      return !!turn.text;
-    });
-  }
-
-  function serializeVoiceDraftForExtraction(draft) {
-    const source = draft && typeof draft === 'object' ? draft : createEmptyVoiceDraft(todayISO());
+  function buildVoiceCleanupPayload(session) {
     return {
-      amount: source.amount,
-      description: source.description || '',
-      date_iso: source.dateIso || todayISO(),
-      partner_share_mode: source.partnerShareMode,
-      partner_share_value: source.partnerShareValue,
-      partner_alias: source.partnerAlias || ''
+      locale: 'en-US',
+      raw_transcript: session && session.rawTranscript ? session.rawTranscript : ''
     };
   }
 
-  function buildVoiceExtractionPayload(session, draftSnapshot) {
+  function buildVoiceExtractionPayload(session) {
     return {
       today_iso: todayISO(),
       locale: 'en-US',
-      current_draft: serializeVoiceDraftForExtraction(draftSnapshot),
-      latest_turn: session && session.latestTurnText ? session.latestTurnText : '',
-      recent_turns: getRecentVoiceTurns(session, 6)
+      cleaned_transcript: session && session.cleanedTranscript ? session.cleanedTranscript : ''
     };
   }
 
@@ -455,6 +598,60 @@
       return voiceUtils.shouldApplyVoiceVersion(latestApplied, candidate);
     }
     return candidate > latestApplied;
+  }
+
+  function getVoicePrimaryActionState(session, draft) {
+    if (voiceUtils.getVoicePrimaryActionState) {
+      return voiceUtils.getVoicePrimaryActionState({
+        draft: draft,
+        phase: session ? session.phase : 'idle',
+        isSaving: !!(session && session.saving)
+      });
+    }
+
+    if (session && session.saving) {
+      return { label: 'Saving…', disabled: true, visible: true, mode: 'saving' };
+    }
+
+    return session && session.phase === 'review'
+      ? { label: 'Save', disabled: !(draft && draft.amount && draft.amount > 0), visible: true, mode: 'save' }
+      : { label: '', disabled: true, visible: false, mode: 'hidden' };
+  }
+
+  function getVoiceHeroActionState(session) {
+    if (voiceUtils.getVoiceHeroActionState) {
+      return voiceUtils.getVoiceHeroActionState({
+        phase: session ? session.phase : 'idle',
+        isSupported: isVoiceCaptureSupported(),
+        elapsedLabel: session ? formatVoiceDuration(session.recordingDurationMs) : '0:00',
+        hasAudio: !!(session && session.audioBlob)
+      });
+    }
+
+    return {
+      label: 'Start recording',
+      caption: 'Speak one expense, then stop to process it',
+      disabled: !isVoiceCaptureSupported(),
+      mode: 'start'
+    };
+  }
+
+  function isVoiceCaptureSupported() {
+    return !!(
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === 'function' &&
+      typeof window.MediaRecorder === 'function'
+    );
+  }
+
+  function hasConfirmedVoiceDraft(session) {
+    return !!(
+      session &&
+      session.phase === 'review' &&
+      session.cleanedTranscript &&
+      voiceDraft &&
+      voiceDraft.source === 'model'
+    );
   }
 
   function buildDefaultExpenseDraft() {
@@ -575,7 +772,7 @@
 
   function setVoiceSessionStatus(message) {
     if (voiceSessionStatus) {
-      voiceSessionStatus.textContent = message || 'Listening';
+      voiceSessionStatus.textContent = message || 'Record one expense and let AI turn it into a draft.';
     }
   }
 
@@ -649,121 +846,16 @@
     if (importFileInput) importFileInput.value = '';
   }
 
-  function renderVoiceDraft() {
-    const activeSession = voiceSession;
-    const hasTranscript = !!(activeSession && activeSession.transcriptText);
-    const partnerAlias = voiceDraft.partnerAlias || '';
-
-    if (voiceAmountValue) {
-      voiceAmountValue.textContent = voiceDraft.amount ? formatEuro(voiceDraft.amount) : 'Waiting…';
-    }
-    if (voiceAmountHint) {
-      voiceAmountHint.textContent = voiceDraft.amount ? 'Updated live while you speak' : 'Say the total amount';
-    }
-
-    if (voiceDescriptionValue) {
-      voiceDescriptionValue.textContent = voiceDraft.description || 'Optional';
-    }
-    if (voiceDescriptionHint) {
-      voiceDescriptionHint.textContent = voiceDraft.description ? 'Merchant, store, or note' : 'Store, merchant, or note';
-    }
-
-    if (voiceDateValue) {
-      voiceDateValue.textContent = formatVoiceDate(voiceDraft.dateIso || todayISO());
-    }
-    if (voiceDateHint) {
-      voiceDateHint.textContent = hasTranscript ? 'Resolved from your dictation' : 'Defaults to today';
-    }
-
-    if (voiceShareValue) {
-      if (voiceDraft.partnerShareMode === 'fixed' && Number.isFinite(voiceDraft.partnerShareValue)) {
-        voiceShareValue.textContent = formatEuro(voiceDraft.partnerShareValue);
-      } else if (voiceDraft.partnerShareMode === 'percent' && Number.isFinite(voiceDraft.partnerShareValue)) {
-        voiceShareValue.textContent = formatPercent(voiceDraft.partnerShareValue);
-      } else {
-        voiceShareValue.textContent = '50 %';
-      }
-    }
-
-    if (voiceShareHint) {
-      if (voiceDraft.partnerShareMode === 'fixed') {
-        voiceShareHint.textContent = partnerAlias ? 'Fixed amount for ' + partnerAlias : 'Fixed amount';
-      } else if (voiceDraft.partnerShareMode === 'percent') {
-        voiceShareHint.textContent = partnerAlias ? 'Split with ' + partnerAlias : 'Percentage split';
-      } else {
-        voiceShareHint.textContent = 'Defaults if you save now';
-      }
-    }
-
-    if (voiceMicToggle) {
-      const isMuted = !!(activeSession && activeSession.isMuted);
-      const isBusy = !!(activeSession && (activeSession.connecting || activeSession.saving));
-      voiceMicToggle.classList.toggle('is-muted', isMuted);
-      voiceMicToggle.classList.toggle('is-busy', isBusy);
-      voiceMicToggle.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
-      voiceMicToggle.setAttribute('aria-label', isMuted ? 'Unmute microphone' : 'Mute microphone');
-    }
-
-    if (voiceDone) {
-      voiceDone.disabled = !(voiceDraft.amount && voiceDraft.amount > 0) || !!(activeSession && activeSession.saving);
-    }
+  function normalizeVoiceText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function applyHeuristicVoiceDraft(currentDraft, heuristicDraft, transcriptText, focusTranscriptText) {
-    if (voiceUtils.applyIncrementalHeuristicDraft) {
-      return voiceUtils.applyIncrementalHeuristicDraft(
-        currentDraft,
-        heuristicDraft,
-        transcriptText,
-        todayISO(),
-        focusTranscriptText
-      );
-    }
+  function canExpandVoiceTranscript(text) {
+    return normalizeVoiceText(text).length > VOICE_TRANSCRIPT_COLLAPSE_THRESHOLD;
+  }
 
-    const baseDraft = currentDraft || createEmptyVoiceDraft(todayISO());
-    const nextDraft = {
-      ...baseDraft,
-      confidence: {
-        amount: baseDraft.confidence ? baseDraft.confidence.amount : 0,
-        description: baseDraft.confidence ? baseDraft.confidence.description : 0,
-        date: baseDraft.confidence ? baseDraft.confidence.date : 0,
-        partnerShare: baseDraft.confidence ? baseDraft.confidence.partnerShare : 0
-      }
-    };
-
-    if (!transcriptText) {
-      return createEmptyVoiceDraft(todayISO());
-    }
-
-    if (heuristicDraft.amount !== null && typeof heuristicDraft.amount !== 'undefined') {
-      nextDraft.amount = heuristicDraft.amount;
-      nextDraft.confidence.amount = heuristicDraft.confidence.amount;
-    }
-
-    if (heuristicDraft.description) {
-      nextDraft.description = heuristicDraft.description;
-      nextDraft.confidence.description = heuristicDraft.confidence.description;
-    }
-
-    if (heuristicDraft.dateIso && heuristicDraft.confidence.date >= 0.65) {
-      nextDraft.dateIso = heuristicDraft.dateIso;
-      nextDraft.confidence.date = heuristicDraft.confidence.date;
-    }
-
-    if (
-      heuristicDraft.partnerShareMode &&
-      heuristicDraft.partnerShareValue !== null &&
-      typeof heuristicDraft.partnerShareValue !== 'undefined'
-    ) {
-      nextDraft.partnerShareMode = heuristicDraft.partnerShareMode;
-      nextDraft.partnerShareValue = heuristicDraft.partnerShareValue;
-      nextDraft.partnerAlias = heuristicDraft.partnerAlias || nextDraft.partnerAlias || '';
-      nextDraft.confidence.partnerShare = heuristicDraft.confidence.partnerShare;
-    }
-
-    nextDraft.isComplete = !!(nextDraft.amount && nextDraft.amount > 0);
-    nextDraft.source = heuristicDraft.source || nextDraft.source || 'heuristic';
-    return nextDraft;
+  function resetVoiceTranscriptExpansion() {
+    voiceTranscriptExpanded = false;
   }
 
   function resetVoiceDraft() {
@@ -774,52 +866,51 @@
   function createVoiceSessionState() {
     return {
       id: uid(),
-      peerConnection: null,
-      dataChannel: null,
+      phase: isVoiceCaptureSupported() ? 'idle' : 'error',
       mediaStream: null,
-      mediaTrack: null,
-      commitments: [],
-      order: [],
-      textsById: {},
-      transcriptText: '',
-      transcriptVersion: 0,
-      heuristicDraft: createEmptyVoiceDraft(todayISO()),
-      latestTurnText: '',
-      isMuted: false,
-      ready: false,
-      connecting: false,
-      closing: false,
+      mediaRecorder: null,
+      recordedChunks: [],
+      audioBlob: null,
+      audioMimeType: '',
+      audioFileName: '',
+      recordingStartedAt: 0,
+      recordingDurationMs: 0,
+      recordingTimerId: null,
+      autoStopTimerId: null,
+      starting: false,
+      processingStep: null,
+      failedStep: null,
+      abortController: null,
+      runId: 0,
       saving: false,
-      extractionTimerId: null,
-      extractionAbortController: null,
-      lastAppliedVersion: 0,
-      nextRequestVersion: 0
+      closing: false,
+      rawTranscript: '',
+      cleanedTranscript: '',
+      errorTitle: 'Processing didn’t finish',
+      errorMessage: 'Try processing this recording again or switch to manual entry.'
     };
   }
 
-  function clearVoiceExtractionTimer(session) {
-    if (!session || !session.extractionTimerId) return;
-    window.clearTimeout(session.extractionTimerId);
-    session.extractionTimerId = null;
+  function clearVoiceRecordingTimers(session) {
+    if (!session) return;
+    if (session.recordingTimerId) {
+      window.clearInterval(session.recordingTimerId);
+      session.recordingTimerId = null;
+    }
+    if (session.autoStopTimerId) {
+      window.clearTimeout(session.autoStopTimerId);
+      session.autoStopTimerId = null;
+    }
   }
 
-  function stopVoiceMedia(session) {
+  function cleanupVoiceMedia(session) {
     if (!session) return;
-    clearVoiceExtractionTimer(session);
 
-    if (session.extractionAbortController) {
-      session.extractionAbortController.abort();
-      session.extractionAbortController = null;
-    }
-
-    if (session.dataChannel) {
-      try { session.dataChannel.close(); } catch (error) {}
-      session.dataChannel = null;
-    }
-
-    if (session.peerConnection) {
-      try { session.peerConnection.close(); } catch (error) {}
-      session.peerConnection = null;
+    if (session.mediaRecorder) {
+      session.mediaRecorder.ondataavailable = null;
+      session.mediaRecorder.onstop = null;
+      session.mediaRecorder.onerror = null;
+      session.mediaRecorder = null;
     }
 
     if (session.mediaStream) {
@@ -827,11 +918,274 @@
         track.stop();
       });
       session.mediaStream = null;
-      session.mediaTrack = null;
+    }
+  }
+
+  function clearVoiceProcessing(session) {
+    if (!session || !session.abortController) return;
+    session.abortController.abort();
+    session.abortController = null;
+  }
+
+  function selectVoiceRecordingMimeType() {
+    if (typeof window.MediaRecorder !== 'function') return '';
+    if (typeof window.MediaRecorder.isTypeSupported !== 'function') return '';
+
+    for (let i = 0; i < VOICE_RECORDING_MIME_TYPES.length; i += 1) {
+      const candidate = VOICE_RECORDING_MIME_TYPES[i];
+      if (window.MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
     }
 
-    session.ready = false;
-    session.connecting = false;
+    return '';
+  }
+
+  function voiceFileExtensionForMimeType(mimeType) {
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.indexOf('mp4') >= 0) return 'mp4';
+    if (normalized.indexOf('ogg') >= 0) return 'ogg';
+    if (normalized.indexOf('mpeg') >= 0 || normalized.indexOf('mp3') >= 0) return 'mp3';
+    if (normalized.indexOf('wav') >= 0) return 'wav';
+    return 'webm';
+  }
+
+  function buildVoiceAudioFileName(mimeType) {
+    return 'voice-expense-' + Date.now() + '.' + voiceFileExtensionForMimeType(mimeType);
+  }
+
+  function setVoiceError(session, title, message) {
+    if (!session) return;
+    session.phase = 'error';
+    session.errorTitle = title || 'Processing didn’t finish';
+    session.errorMessage = message || 'Try processing this recording again or switch to manual entry.';
+    setVoiceSheetStatus('', '');
+    renderVoiceDraft();
+  }
+
+  function updateVoiceProcessingSteps(session) {
+    const steps = [
+      { key: 'transcribing', element: voiceProcessingStepTranscription },
+      { key: 'cleaning', element: voiceProcessingStepCleanup },
+      { key: 'extracting', element: voiceProcessingStepExtraction }
+    ];
+    const order = {
+      transcribing: 0,
+      cleaning: 1,
+      extracting: 2
+    };
+    const currentIndex = session && session.processingStep ? order[session.processingStep] : -1;
+    const failedIndex = session && session.failedStep ? order[session.failedStep] : -1;
+
+    steps.forEach(function (step, index) {
+      if (!step.element) return;
+      step.element.classList.remove('is-active', 'is-done', 'is-error');
+
+      if (session && session.phase === 'review') {
+        step.element.classList.add('is-done');
+        return;
+      }
+
+      if (session && session.phase === 'processing') {
+        if (index < currentIndex) {
+          step.element.classList.add('is-done');
+        } else if (index === currentIndex) {
+          step.element.classList.add('is-active');
+        }
+        return;
+      }
+
+      if (session && session.phase === 'error' && failedIndex >= 0) {
+        if (index < failedIndex) {
+          step.element.classList.add('is-done');
+        } else if (index === failedIndex) {
+          step.element.classList.add('is-error');
+        }
+      }
+    });
+  }
+
+  function renderVoiceDraft() {
+    const activeSession = voiceSession;
+    const phase = activeSession ? activeSession.phase : 'idle';
+    const heroAction = getVoiceHeroActionState(activeSession);
+    const primaryAction = getVoicePrimaryActionState(activeSession, voiceDraft);
+    const partnerAlias = voiceDraft.partnerAlias || '';
+    const defaultedFields = voiceDraft.defaultedFields || { date: false, partnerShare: false };
+    const hasReview = phase === 'review';
+    const isUnsupported = !!(activeSession && !isVoiceCaptureSupported());
+    const isRecording = phase === 'recording';
+    const isProcessing = phase === 'processing';
+    const heroVisible = phase === 'idle' || phase === 'recording';
+    const cleanedTranscript = hasReview
+      ? normalizeVoiceText(activeSession && activeSession.cleanedTranscript ? activeSession.cleanedTranscript : '')
+      : '';
+    const transcriptExpandable = hasReview && canExpandVoiceTranscript(cleanedTranscript);
+
+    if (!transcriptExpandable && voiceTranscriptExpanded) {
+      voiceTranscriptExpanded = false;
+    }
+
+    if (voiceSheet) {
+      voiceSheet.dataset.phase = phase;
+    }
+
+    if (voiceMicToggle) {
+      const isBusy = !!(activeSession && (activeSession.starting || activeSession.saving || isProcessing));
+      const label = activeSession && activeSession.starting ? 'Opening microphone…' : heroAction.label;
+      const caption = activeSession && activeSession.starting ? 'Please allow microphone access' : heroAction.caption;
+      voiceMicToggle.disabled = heroAction.disabled || isBusy;
+      voiceMicToggle.classList.toggle('is-recording', isRecording);
+      voiceMicToggle.classList.toggle('is-processing', !!(activeSession && activeSession.starting));
+      voiceMicToggle.classList.toggle('is-muted', isUnsupported);
+      voiceMicToggle.setAttribute('aria-label', label);
+      if (voiceMicLabel) voiceMicLabel.textContent = label;
+      if (voiceMicCaption) voiceMicCaption.textContent = caption;
+    }
+
+    if (voiceHero) {
+      voiceHero.hidden = !heroVisible;
+    }
+    if (voicePrivacyNote) {
+      voicePrivacyNote.hidden = !heroVisible;
+    }
+
+    if (voiceProcessingCard) {
+      voiceProcessingCard.hidden = phase !== 'processing';
+    }
+    if (voiceErrorCard) {
+      voiceErrorCard.hidden = phase !== 'error';
+    }
+    if (voiceReviewSection) {
+      voiceReviewSection.hidden = !hasReview;
+    }
+    if (voiceRecordAgain) {
+      voiceRecordAgain.hidden = !hasReview;
+    }
+    if (voiceRetryProcessing) {
+      voiceRetryProcessing.hidden = !(phase === 'error' && activeSession && activeSession.audioBlob);
+    }
+    if (voiceSwitchManual) {
+      voiceSwitchManual.hidden = !(phase === 'review' || phase === 'error');
+    }
+    if (voiceActions) {
+      voiceActions.hidden = !(phase === 'review' || phase === 'error');
+    }
+
+    if (voiceDone) {
+      voiceDone.hidden = !primaryAction.visible;
+      voiceDone.disabled = primaryAction.disabled;
+      voiceDone.textContent = primaryAction.label || 'Save';
+    }
+
+    if (voiceTranscriptValue) {
+      voiceTranscriptValue.textContent = hasReview
+        ? (cleanedTranscript || 'No cleaned transcript available.')
+        : 'Waiting for processing…';
+      voiceTranscriptValue.classList.toggle('is-collapsed', transcriptExpandable && !voiceTranscriptExpanded);
+      voiceTranscriptValue.classList.toggle('is-expanded', transcriptExpandable && voiceTranscriptExpanded);
+    }
+    if (voiceTranscriptToggle) {
+      voiceTranscriptToggle.hidden = !transcriptExpandable;
+      voiceTranscriptToggle.textContent = voiceTranscriptExpanded ? 'Show less' : 'Show more';
+    }
+
+    if (voiceErrorTitle) {
+      voiceErrorTitle.textContent = activeSession && activeSession.errorTitle
+        ? activeSession.errorTitle
+        : 'Processing didn’t finish';
+    }
+    if (voiceErrorMessage) {
+      voiceErrorMessage.textContent = activeSession && activeSession.errorMessage
+        ? activeSession.errorMessage
+        : 'Try processing this recording again or switch to manual entry.';
+    }
+
+    if (voiceAmountValue) {
+      voiceAmountValue.textContent = hasReview
+        ? (voiceDraft.amount ? formatEuro(voiceDraft.amount) : 'Missing')
+        : 'Waiting…';
+    }
+    if (voiceAmountHint) {
+      voiceAmountHint.textContent = hasReview
+        ? (voiceDraft.amount ? 'AI-extracted total' : 'Add the total manually before saving')
+        : 'Visible after processing';
+    }
+
+    if (voiceDescriptionValue) {
+      voiceDescriptionValue.textContent = hasReview
+        ? (voiceDraft.description || 'Optional')
+        : 'Waiting…';
+    }
+    if (voiceDescriptionHint) {
+      voiceDescriptionHint.textContent = hasReview
+        ? (voiceDraft.description ? 'Cleaned from your dictation' : 'Optional')
+        : 'Visible after processing';
+    }
+
+    if (voiceDateValue) {
+      voiceDateValue.textContent = hasReview
+        ? formatVoiceDate(voiceDraft.dateIso || todayISO())
+        : 'Pending';
+    }
+    if (voiceDateHint) {
+      voiceDateHint.textContent = hasReview
+        ? (defaultedFields.date ? 'Using today by default' : 'Confirmed from your dictation')
+        : 'Visible after processing';
+    }
+
+    if (voiceShareValue) {
+      if (!hasReview) {
+        voiceShareValue.textContent = 'Pending';
+      } else if (voiceDraft.partnerShareMode === 'fixed' && Number.isFinite(voiceDraft.partnerShareValue)) {
+        voiceShareValue.textContent = formatEuro(voiceDraft.partnerShareValue);
+      } else if (voiceDraft.partnerShareMode === 'percent' && Number.isFinite(voiceDraft.partnerShareValue)) {
+        voiceShareValue.textContent = formatPercent(voiceDraft.partnerShareValue);
+      } else {
+        voiceShareValue.textContent = '50 %';
+      }
+    }
+    if (voiceShareHint) {
+      if (!hasReview) {
+        voiceShareHint.textContent = 'Visible after processing';
+      } else if (defaultedFields.partnerShare) {
+        voiceShareHint.textContent = 'Using 50 % default if you save now';
+      } else if (voiceDraft.partnerShareMode === 'fixed') {
+        voiceShareHint.textContent = partnerAlias ? 'Fixed amount for ' + partnerAlias : 'Fixed amount';
+      } else if (voiceDraft.partnerShareMode === 'percent') {
+        voiceShareHint.textContent = partnerAlias ? 'Split with ' + partnerAlias : 'Percentage split';
+      } else {
+        voiceShareHint.textContent = 'No split found';
+      }
+    }
+
+    updateVoiceProcessingSteps(activeSession);
+  }
+
+  function releaseVoiceCapture(session) {
+    clearVoiceRecordingTimers(session);
+    cleanupVoiceMedia(session);
+  }
+
+  function resetVoiceSessionResults(session, options) {
+    const resetOptions = options || {};
+    if (!session) return;
+    resetVoiceTranscriptExpansion();
+
+    if (!resetOptions.preserveAudio) {
+      session.audioBlob = null;
+      session.audioMimeType = '';
+      session.audioFileName = '';
+      session.recordedChunks = [];
+    }
+
+    session.rawTranscript = '';
+    session.cleanedTranscript = '';
+    session.processingStep = null;
+    session.failedStep = null;
+    session.errorTitle = 'Processing didn’t finish';
+    session.errorMessage = 'Try processing this recording again or switch to manual entry.';
+    voiceDraft = createEmptyVoiceDraft(todayISO());
   }
 
   function closeVoiceSheet(options) {
@@ -840,15 +1194,23 @@
     if (voiceSheet) voiceSheet.classList.remove('open');
 
     if (voiceSession) {
+      voiceDebug.log('voice.session.closed', {
+        sessionId: voiceSession.id,
+        phase: voiceSession.phase,
+        hadAudio: !!voiceSession.audioBlob,
+        hadCleanedTranscript: !!voiceSession.cleanedTranscript
+      });
       voiceSession.closing = true;
-      stopVoiceMedia(voiceSession);
+      clearVoiceProcessing(voiceSession);
+      releaseVoiceCapture(voiceSession);
       voiceSession = null;
     }
 
     if (!closeOptions.preserveDraft) {
       resetVoiceDraft();
     }
-    setVoiceSessionStatus('Listening');
+    resetVoiceTranscriptExpansion();
+    setVoiceSessionStatus('Record one expense and let AI turn it into a draft.');
     setVoiceSheetStatus('', '');
   }
 
@@ -865,55 +1227,35 @@
 
     closeSheet();
     closeSettingsSheet();
-    resetVoiceDraft();
     setVoiceSheetStatus('', '');
-    setVoiceSessionStatus('Connecting…');
+    resetVoiceTranscriptExpansion();
 
     if (voiceOverlay) voiceOverlay.classList.add('open');
     if (voiceSheet) voiceSheet.classList.add('open');
 
     const session = createVoiceSessionState();
     voiceSession = session;
-    renderVoiceDraft();
+    resetVoiceSessionResults(session);
+    setVoiceSessionStatus('Record one expense and let AI turn it into a draft.');
+    voiceDebug.log('voice.session.opened', {
+      sessionId: session.id,
+      transcriptionModel: VOICE_TRANSCRIPTION_MODEL,
+      cleanupModel: VOICE_CLEANUP_MODEL,
+      extractModel: VOICE_EXTRACT_MODEL,
+      supportedMimeType: selectVoiceRecordingMimeType() || 'browser-default',
+      includeLogprobs: voiceDebug.isEnabled()
+    });
 
-    startVoiceSession(session).catch(function (error) {
-      if (voiceSession !== session) return;
-      stopVoiceMedia(session);
-      setVoiceSessionStatus('Voice unavailable');
-      setVoiceSheetStatus(
-        error && error.message
-          ? error.message
-          : 'Voice mode could not connect. You can switch to manual entry instead.',
-        'error'
+    if (!isVoiceCaptureSupported()) {
+      setVoiceSessionStatus('Voice capture is unavailable on this device.');
+      setVoiceError(
+        session,
+        'Voice capture is unavailable',
+        'This browser does not support local audio recording yet. Use manual entry instead.'
       );
+    } else {
       renderVoiceDraft();
-    });
-  }
-
-  function waitForIceGatheringComplete(peerConnection) {
-    return new Promise(function (resolve) {
-      if (!peerConnection || peerConnection.iceGatheringState === 'complete') {
-        resolve();
-        return;
-      }
-
-      let settled = false;
-      const handleStateChange = function () {
-        if (peerConnection.iceGatheringState === 'complete' && !settled) {
-          settled = true;
-          peerConnection.removeEventListener('icegatheringstatechange', handleStateChange);
-          resolve();
-        }
-      };
-
-      peerConnection.addEventListener('icegatheringstatechange', handleStateChange);
-      window.setTimeout(function () {
-        if (settled) return;
-        settled = true;
-        peerConnection.removeEventListener('icegatheringstatechange', handleStateChange);
-        resolve();
-      }, 1500);
-    });
+    }
   }
 
   async function readOpenAIError(response, fallbackMessage) {
@@ -953,53 +1295,37 @@
     return response.json();
   }
 
-  async function createVoiceClientSecret(apiKey, secondsToLive) {
-    return postOpenAIJson('/realtime/client_secrets', apiKey, {
-      expires_after: {
-        anchor: 'created_at',
-        seconds: secondsToLive || 600
-      },
-      session: {
-        type: 'transcription',
-        audio: {
-          input: {
-            noise_reduction: { type: 'near_field' },
-            transcription: {
-              model: VOICE_TRANSCRIPTION_MODEL,
-              prompt: VOICE_TRANSCRIPTION_PROMPT
-            },
-            turn_detection: {
-              type: 'server_vad',
-              create_response: false,
-              interrupt_response: false,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 450
-            }
-          }
-        }
-      }
-    });
-  }
+  function getResponseOutputText(response) {
+    if (!response || typeof response !== 'object') return '';
 
-  async function createRealtimeCall(clientSecret, offerSdp) {
-    const response = await fetch('https://api.openai.com/v1/realtime/calls', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + clientSecret,
-        'Content-Type': 'application/sdp'
-      },
-      body: offerSdp
-    });
-
-    if (!response.ok) {
-      throw new Error(await readOpenAIError(response, 'The OpenAI voice session could not be created.'));
+    if (typeof response.output_text === 'string' && response.output_text.trim()) {
+      return response.output_text.trim();
     }
 
-    return response.text();
-  }
+    if (!Array.isArray(response.output)) return '';
 
-  function getResponseOutputText(response) {
-    if (!response || !Array.isArray(response.output)) return '';
+    const outputTexts = [];
+
+    for (let i = 0; i < response.output.length; i += 1) {
+      const outputItem = response.output[i];
+      if (!outputItem || outputItem.type !== 'message' || !Array.isArray(outputItem.content)) continue;
+
+      for (let j = 0; j < outputItem.content.length; j += 1) {
+        const contentItem = outputItem.content[j];
+        if (
+          contentItem &&
+          contentItem.type === 'output_text' &&
+          typeof contentItem.text === 'string' &&
+          contentItem.text.trim()
+        ) {
+          outputTexts.push(contentItem.text.trim());
+        }
+      }
+    }
+
+    if (outputTexts.length) {
+      return outputTexts.join('\n').trim();
+    }
 
     for (let i = 0; i < response.output.length; i += 1) {
       const outputItem = response.output[i];
@@ -1007,13 +1333,132 @@
 
       for (let j = 0; j < outputItem.content.length; j += 1) {
         const contentItem = outputItem.content[j];
-        if (contentItem && typeof contentItem.text === 'string') {
-          return contentItem.text;
+        if (contentItem && typeof contentItem.text === 'string' && contentItem.text.trim()) {
+          return contentItem.text.trim();
         }
       }
     }
 
     return '';
+  }
+
+  function createSilentWavBlob(durationMs) {
+    const sampleRate = 16000;
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
+    const sampleCount = Math.max(1, Math.floor(sampleRate * (durationMs / 1000)));
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = sampleCount * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    function writeString(offset, value) {
+      for (let i = 0; i < value.length; i += 1) {
+        view.setUint8(offset + i, value.charCodeAt(i));
+      }
+    }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  async function postOpenAIAudioTranscription(apiKey, audioBlob, fileName, signal) {
+    const formData = new FormData();
+    formData.append('file', audioBlob, fileName);
+    formData.append('model', VOICE_TRANSCRIPTION_MODEL);
+    formData.append('response_format', 'json');
+    formData.append('stream', 'false');
+    formData.append('temperature', '0');
+    formData.append('prompt', VOICE_TRANSCRIPTION_PROMPT);
+    if (voiceDebug.isEnabled()) {
+      formData.append('include[]', 'logprobs');
+    }
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey
+      },
+      body: formData,
+      signal: signal
+    });
+
+    if (!response.ok) {
+      throw new Error(await readOpenAIError(response, 'The audio transcription request failed.'));
+    }
+
+    return response.json();
+  }
+
+  function getOpenAIResponseMeta(response) {
+    if (!response || typeof response !== 'object') return null;
+
+    return {
+      id: response.id || null,
+      model: response.model || null,
+      status: response.status || null,
+      incompleteDetails: response.incomplete_details || null,
+      error: response.error || null,
+      usage: response.usage || null
+    };
+  }
+
+  function parseStructuredResponseJson(response, label) {
+    const prefix = typeof label === 'string' && label ? label : 'The model';
+    const outputText = getResponseOutputText(response);
+    const responseMeta = getOpenAIResponseMeta(response);
+
+    if (!outputText) {
+      const emptyError = new Error(prefix + ' returned an empty response.');
+      emptyError.name = 'StructuredResponseEmptyError';
+      emptyError.outputText = '';
+      emptyError.responseMeta = responseMeta;
+      throw emptyError;
+    }
+
+    try {
+      return {
+        value: JSON.parse(outputText),
+        outputText: outputText,
+        responseMeta: responseMeta
+      };
+    } catch (error) {
+      const parseError = new Error(prefix + ' returned invalid structured JSON.');
+      parseError.name = 'StructuredResponseParseError';
+      parseError.outputText = outputText;
+      parseError.responseMeta = responseMeta;
+      parseError.cause = error;
+      throw parseError;
+    }
+  }
+
+  function buildVoiceCleanupSchema() {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      required: ['cleaned_transcript'],
+      properties: {
+        cleaned_transcript: {
+          type: 'string',
+          description: 'A cleaned single-utterance transcript for user review and downstream extraction.'
+        }
+      }
+    };
   }
 
   function buildVoiceExtractionSchema() {
@@ -1027,7 +1472,6 @@
         'partner_share_mode',
         'partner_share_value',
         'partner_alias',
-        'updated_fields',
         'confidence',
         'is_complete'
       ],
@@ -1057,17 +1501,6 @@
           type: 'string',
           description: 'Partner alias if the speaker used one, otherwise an empty string.'
         },
-        updated_fields: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['amount', 'description', 'date', 'partner_share'],
-          properties: {
-            amount: { type: 'boolean' },
-            description: { type: 'boolean' },
-            date: { type: 'boolean' },
-            partner_share: { type: 'boolean' }
-          }
-        },
         confidence: {
           type: 'object',
           additionalProperties: false,
@@ -1087,26 +1520,51 @@
     };
   }
 
+  async function requestVoiceCleanup(apiKey, cleanupPayload, signal) {
+    const response = await postOpenAIJson('/responses', apiKey, {
+      model: VOICE_CLEANUP_MODEL,
+      store: false,
+      max_output_tokens: 180,
+      reasoning: {
+        effort: VOICE_CLEANUP_REASONING_EFFORT
+      },
+      instructions: VOICE_CLEANUP_PROMPT,
+      input: [{
+        role: 'user',
+        content: [{
+          type: 'input_text',
+          text: JSON.stringify(cleanupPayload, null, 2)
+        }]
+      }],
+      text: {
+        verbosity: 'low',
+        format: {
+          type: 'json_schema',
+          name: 'cleaned_expense_transcript',
+          strict: true,
+          schema: buildVoiceCleanupSchema()
+        }
+      }
+    }, signal);
+
+    const parsed = parseStructuredResponseJson(response, 'The cleanup model');
+
+    return {
+      cleaned: parsed.value,
+      outputText: parsed.outputText,
+      responseMeta: parsed.responseMeta
+    };
+  }
+
   async function requestVoiceExtraction(apiKey, extractionPayload, signal) {
     const response = await postOpenAIJson('/responses', apiKey, {
       model: VOICE_EXTRACT_MODEL,
       store: false,
-      max_output_tokens: 360,
+      max_output_tokens: 320,
       reasoning: {
-        effort: 'minimal'
+        effort: VOICE_EXTRACT_REASONING_EFFORT
       },
-      instructions: [
-        'You update an existing expense draft from the newest hidden voice transcription turn.',
-        'Treat current_draft as the source of truth for previously accepted fields.',
-        'Use latest_turn as the strongest signal and recent_turns only as nearby context.',
-        'Preserve current_draft values for fields the newest utterance does not change.',
-        'Later corrections override earlier mentions, but only when the newest utterance supports that change.',
-        'If the speaker names a wife, husband, spouse, or partner, treat that as the partner share.',
-        'If a fixed partner amount is stated after a percentage, keep the later fixed amount.',
-        'Return the next full draft after applying the newest utterance.',
-        'Set updated_fields.<field> to true only if the newest utterance materially sets, corrects, or clears that field.',
-        'Use null for unknown numeric fields and an empty string for unknown text.'
-      ].join(' '),
+      instructions: VOICE_EXTRACT_PROMPT,
       input: [{
         role: 'user',
         content: [{
@@ -1115,6 +1573,7 @@
         }]
       }],
       text: {
+        verbosity: 'low',
         format: {
           type: 'json_schema',
           name: 'expense_voice_draft',
@@ -1124,12 +1583,13 @@
       }
     }, signal);
 
-    const outputText = getResponseOutputText(response);
-    if (!outputText) {
-      throw new Error('The extraction model returned an empty response.');
-    }
+    const parsed = parseStructuredResponseJson(response, 'The extraction model');
 
-    return JSON.parse(outputText);
+    return {
+      extracted: parsed.value,
+      outputText: parsed.outputText,
+      responseMeta: parsed.responseMeta
+    };
   }
 
   async function verifyVoiceKeyWithResponses(apiKey) {
@@ -1138,11 +1598,12 @@
       store: false,
       max_output_tokens: 40,
       reasoning: {
-        effort: 'minimal'
+        effort: 'none'
       },
-      instructions: 'Return JSON that confirms the API key can reach the Responses API.',
+      instructions: 'Return JSON that confirms the API key can reach the Responses API with gpt-5.4.',
       input: 'Verification request for Mäuse voice mode.',
       text: {
+        verbosity: 'low',
         format: {
           type: 'json_schema',
           name: 'voice_mode_verification',
@@ -1161,15 +1622,15 @@
       }
     });
 
-    const outputText = getResponseOutputText(response);
-    if (!outputText) {
-      throw new Error('The verification request returned an empty response.');
-    }
-
-    const parsed = JSON.parse(outputText);
-    if (!parsed || parsed.ok !== true) {
+    const parsedResponse = parseStructuredResponseJson(response, 'The verification request');
+    if (!parsedResponse.value || parsedResponse.value.ok !== true) {
       throw new Error('The verification response was not valid.');
     }
+  }
+
+  async function verifyVoiceKeyWithTranscription(apiKey) {
+    const silentBlob = createSilentWavBlob(250);
+    await postOpenAIAudioTranscription(apiKey, silentBlob, 'voice-check.wav');
   }
 
   async function verifyVoiceKey() {
@@ -1181,10 +1642,10 @@
     }
 
     setSettingsBusy(true);
-    setVoiceSettingsStatus('Verifying Realtime and Responses access…', 'info');
+    setVoiceSettingsStatus('Verifying gpt-4o-transcribe and gpt-5.4 access…', 'info');
 
     try {
-      await createVoiceClientSecret(apiKey, 90);
+      await verifyVoiceKeyWithTranscription(apiKey);
       await verifyVoiceKeyWithResponses(apiKey);
       voiceSettings = {
         apiKey: apiKey,
@@ -1193,7 +1654,7 @@
       };
       saveVoiceSettings();
       renderVoiceSettings();
-      setVoiceSettingsStatus('Key verified. You can enable voice mode now.', 'success');
+      setVoiceSettingsStatus('Key verified for gpt-4o-transcribe and gpt-5.4. You can enable voice mode now.', 'success');
     } catch (error) {
       voiceSettings = {
         apiKey: apiKey,
@@ -1211,345 +1672,525 @@
     }
   }
 
-  async function startVoiceSession(session) {
-    if (!session) return;
+  function getVoiceRunStillCurrent(session, runId) {
+    return !!(voiceSession === session && session && !session.closing && session.runId === runId);
+  }
+
+  function getVoicePermissionErrorMessage(error) {
+    if (!error || !error.name) {
+      return 'Microphone access could not be started.';
+    }
+
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      return 'Microphone access was denied. Allow access and try again.';
+    }
+    if (error.name === 'NotFoundError') {
+      return 'No microphone was found on this device.';
+    }
+    if (error.name === 'NotReadableError') {
+      return 'The microphone is already in use by another app.';
+    }
+
+    return error.message || 'Microphone access could not be started.';
+  }
+
+  async function processVoiceAudio(session, options) {
+    const processOptions = options || {};
+    if (!session || !session.audioBlob || !voiceSettings.apiKey) return null;
     if (!navigator.onLine) {
-      throw new Error('Voice mode needs an internet connection.');
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('This browser does not support microphone capture.');
-    }
-    if (!window.RTCPeerConnection) {
-      throw new Error('This browser does not support WebRTC voice sessions.');
+      setVoiceSessionStatus('Voice mode needs an internet connection.');
+      setVoiceError(session, 'No internet connection', 'Reconnect to the internet, then retry processing or switch to manual entry.');
+      return null;
     }
 
-    session.connecting = true;
+    session.runId += 1;
+    const runId = session.runId;
+    clearVoiceProcessing(session);
+    const abortController = new AbortController();
+    session.abortController = abortController;
+    session.phase = 'processing';
+    session.processingStep = 'transcribing';
+    session.failedStep = null;
+    session.errorTitle = 'Processing didn’t finish';
+    session.errorMessage = 'Try processing this recording again or switch to manual entry.';
+    session.rawTranscript = '';
+    session.cleanedTranscript = '';
+    resetVoiceTranscriptExpansion();
+    voiceDraft = createEmptyVoiceDraft(todayISO());
+    setVoiceSessionStatus('Transcribing audio…');
+    setVoiceSheetStatus('', '');
     renderVoiceDraft();
 
-    const stream = await navigator.mediaDevices.getUserMedia({
+    voiceDebug.log('voice.processing.started', {
+      sessionId: session.id,
+      runId: runId,
+      reason: processOptions.reason || 'recording_stopped',
       audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
+        mimeType: session.audioMimeType,
+        fileName: session.audioFileName,
+        size: session.audioBlob.size,
+        durationMs: session.recordingDurationMs
       }
     });
-
-    if (voiceSession !== session) {
-      stream.getTracks().forEach(function (track) { track.stop(); });
-      return;
-    }
-
-    session.mediaStream = stream;
-    session.mediaTrack = stream.getAudioTracks()[0] || null;
-
-    const peerConnection = new RTCPeerConnection();
-    session.peerConnection = peerConnection;
-
-    stream.getTracks().forEach(function (track) {
-      peerConnection.addTrack(track, stream);
-    });
-
-    const dataChannel = peerConnection.createDataChannel('oai-events');
-    session.dataChannel = dataChannel;
-
-    dataChannel.addEventListener('open', function () {
-      if (voiceSession !== session) return;
-      session.ready = true;
-      session.connecting = false;
-      setVoiceSessionStatus(session.isMuted ? 'Muted' : 'Listening');
-      setVoiceSheetStatus('', '');
-      renderVoiceDraft();
-    });
-
-    dataChannel.addEventListener('close', function () {
-      if (voiceSession !== session || session.closing) return;
-      session.ready = false;
-      setVoiceSessionStatus('Voice paused');
-      setVoiceSheetStatus('The voice session disconnected. You can retry or switch to manual entry.', 'error');
-      renderVoiceDraft();
-    });
-
-    dataChannel.addEventListener('message', function (event) {
-      if (voiceSession !== session) return;
-      handleVoiceServerEvent(session, event.data);
-    });
-
-    peerConnection.addEventListener('connectionstatechange', function () {
-      if (voiceSession !== session || session.closing) return;
-      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
-        session.ready = false;
-        setVoiceSessionStatus('Voice paused');
-        setVoiceSheetStatus('The voice connection dropped. You can retry or switch to manual entry.', 'error');
-        renderVoiceDraft();
-      }
-    });
-
-    const clientSecret = await createVoiceClientSecret(voiceSettings.apiKey, 600);
-    if (voiceSession !== session) return;
-
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    await waitForIceGatheringComplete(peerConnection);
-    const localDescription = peerConnection.localDescription;
-    const answer = await createRealtimeCall(clientSecret.value, localDescription ? localDescription.sdp : offer.sdp);
-
-    if (voiceSession !== session) return;
-
-    await peerConnection.setRemoteDescription({
-      type: 'answer',
-      sdp: answer
-    });
-
-    setVoiceSessionStatus('Listening');
-    renderVoiceDraft();
-  }
-
-  function rebuildVoiceTranscript(session) {
-    session.order = resolveCommittedTurnOrder(session.commitments);
-    const nextTranscriptText = composeTranscriptText(session.order, session.textsById);
-    session.latestTurnText = getLatestVoiceTurnText(session);
-
-    if (nextTranscriptText !== session.transcriptText) {
-      session.transcriptVersion += 1;
-      session.transcriptText = nextTranscriptText;
-    }
-
-    session.heuristicDraft = parseTranscriptDraft(session.transcriptText);
-    voiceDraft = applyHeuristicVoiceDraft(
-      voiceDraft,
-      session.heuristicDraft,
-      session.transcriptText,
-      session.latestTurnText
-    );
-    renderVoiceDraft();
-  }
-
-  function ensureCommittedTurn(session, itemId) {
-    if (!itemId) return;
-    const alreadyPresent = session.commitments.some(function (commit) {
-      return commit.itemId === itemId;
-    });
-    if (!alreadyPresent) {
-      session.commitments.push({ itemId: itemId, previousItemId: null });
-    }
-  }
-
-  function queueVoiceExtraction(session, immediate) {
-    if (!session || !session.transcriptText) return;
-    clearVoiceExtractionTimer(session);
-
-    const delay = immediate ? 0 : VOICE_EXTRACT_DEBOUNCE_MS;
-    session.extractionTimerId = window.setTimeout(function () {
-      runVoiceExtraction(session);
-    }, delay);
-  }
-
-  async function runVoiceExtraction(session) {
-    if (!session || !session.transcriptText || !voiceSettings.apiKey) return null;
-
-    session.nextRequestVersion += 1;
-    const requestVersion = session.nextRequestVersion;
-    const transcriptVersion = session.transcriptVersion;
-    const latestTurnText = session.latestTurnText;
-    const fallbackDraft = session.heuristicDraft || parseTranscriptDraft(session.transcriptText);
-    const stabilizedDraft = applyHeuristicVoiceDraft(
-      voiceDraft,
-      fallbackDraft,
-      session.transcriptText,
-      latestTurnText
-    );
-    const extractionPayload = buildVoiceExtractionPayload(session, stabilizedDraft);
-
-    if (session.extractionAbortController) {
-      session.extractionAbortController.abort();
-    }
-    session.extractionAbortController = new AbortController();
 
     try {
-      const extracted = await requestVoiceExtraction(
+      voiceDebug.log('voice.transcription.request', {
+        sessionId: session.id,
+        runId: runId,
+        model: VOICE_TRANSCRIPTION_MODEL,
+        prompt: VOICE_TRANSCRIPTION_PROMPT,
+        includeLogprobs: voiceDebug.isEnabled()
+      });
+      const transcriptionResponse = await postOpenAIAudioTranscription(
         voiceSettings.apiKey,
-        extractionPayload,
-        session.extractionAbortController.signal
+        session.audioBlob,
+        session.audioFileName || buildVoiceAudioFileName(session.audioMimeType),
+        abortController.signal
       );
 
-      if (
-        voiceSession !== session ||
-        session.transcriptVersion !== transcriptVersion ||
-        requestVersion !== session.nextRequestVersion ||
-        !shouldApplyVoiceVersion(session.lastAppliedVersion, requestVersion)
-      ) {
+      if (!getVoiceRunStillCurrent(session, runId)) {
+        voiceDebug.log('voice.processing.stale_ignored', {
+          sessionId: session.id,
+          runId: runId,
+          stage: 'transcribing'
+        });
         return null;
       }
 
-      const normalized = normalizeVoiceExtraction(extracted);
-      voiceDraft = mergeVoiceDrafts(stabilizedDraft, normalized);
-      session.lastAppliedVersion = requestVersion;
-      setVoiceSheetStatus('', '');
+      session.rawTranscript = normalizeVoiceText(transcriptionResponse.text || '');
+      voiceDebug.log('voice.transcription.response', {
+        sessionId: session.id,
+        runId: runId,
+        rawTranscript: session.rawTranscript,
+        response: transcriptionResponse
+      });
+
+      if (!session.rawTranscript) {
+        throw new Error('We could not understand enough of that recording to review it.');
+      }
+
+      session.processingStep = 'cleaning';
+      setVoiceSessionStatus('Cleaning transcript…');
+      renderVoiceDraft();
+
+      const cleanupPayload = buildVoiceCleanupPayload(session);
+      voiceDebug.log('voice.cleanup.request', {
+        sessionId: session.id,
+        runId: runId,
+        model: VOICE_CLEANUP_MODEL,
+        reasoningEffort: VOICE_CLEANUP_REASONING_EFFORT,
+        payload: cleanupPayload,
+        prompt: VOICE_CLEANUP_PROMPT
+      });
+      const cleanupResult = await requestVoiceCleanup(
+        voiceSettings.apiKey,
+        cleanupPayload,
+        abortController.signal
+      );
+
+      if (!getVoiceRunStillCurrent(session, runId)) {
+        voiceDebug.log('voice.processing.stale_ignored', {
+          sessionId: session.id,
+          runId: runId,
+          stage: 'cleaning'
+        });
+        return null;
+      }
+
+      session.cleanedTranscript = normalizeVoiceText(
+        cleanupResult.cleaned && cleanupResult.cleaned.cleaned_transcript
+          ? cleanupResult.cleaned.cleaned_transcript
+          : ''
+      );
+      voiceDebug.log('voice.cleanup.response', {
+        sessionId: session.id,
+        runId: runId,
+        responseMeta: cleanupResult.responseMeta,
+        outputText: cleanupResult.outputText,
+        parsedOutput: cleanupResult.cleaned,
+        cleanedTranscript: session.cleanedTranscript
+      });
+
+      if (!session.cleanedTranscript) {
+        throw new Error('The transcript was too unclear to clean into a reviewable sentence.');
+      }
+
+      session.processingStep = 'extracting';
+      setVoiceSessionStatus('Extracting expense…');
+      renderVoiceDraft();
+
+      const extractionPayload = buildVoiceExtractionPayload(session);
+      voiceDebug.log('voice.extraction.request', {
+        sessionId: session.id,
+        runId: runId,
+        model: VOICE_EXTRACT_MODEL,
+        reasoningEffort: VOICE_EXTRACT_REASONING_EFFORT,
+        payload: extractionPayload,
+        prompt: VOICE_EXTRACT_PROMPT
+      });
+      const extractionResult = await requestVoiceExtraction(
+        voiceSettings.apiKey,
+        extractionPayload,
+        abortController.signal
+      );
+
+      if (!getVoiceRunStillCurrent(session, runId)) {
+        voiceDebug.log('voice.processing.stale_ignored', {
+          sessionId: session.id,
+          runId: runId,
+          stage: 'extracting'
+        });
+        return null;
+      }
+
+      voiceDraft = normalizeVoiceExtraction(extractionResult.extracted);
+      resetVoiceTranscriptExpansion();
+      session.phase = 'review';
+      session.processingStep = null;
+      session.failedStep = null;
+      setVoiceSessionStatus(
+        voiceDraft.amount
+          ? 'Review the result and save if it looks right.'
+          : 'Review the result or edit it manually.'
+      );
+      setVoiceSheetStatus(
+        voiceDraft.amount
+          ? ''
+          : 'The total amount is still missing, so Save stays disabled until you edit it manually.',
+        voiceDraft.amount ? '' : ''
+      );
+      voiceDebug.log('voice.extraction.response', {
+        sessionId: session.id,
+        runId: runId,
+        responseMeta: extractionResult.responseMeta,
+        outputText: extractionResult.outputText,
+        parsedOutput: extractionResult.extracted,
+        normalizedDraft: voiceDraft
+      });
       renderVoiceDraft();
       return voiceDraft;
     } catch (error) {
       if (error && error.name === 'AbortError') {
+        voiceDebug.log('voice.processing.aborted', {
+          sessionId: session.id,
+          runId: runId,
+          stage: session.processingStep
+        });
         return null;
       }
 
-      if (voiceSession === session) {
-        setVoiceSheetStatus(
-          'The AI extraction step hit an error, but the preview cards will keep using the live fallback parser.',
-          'error'
+      const failedStep = session.processingStep || 'transcribing';
+      session.failedStep = failedStep;
+      voiceDebug.log('voice.processing.error', {
+        sessionId: session.id,
+        runId: runId,
+        stage: failedStep,
+        message: error && error.message ? error.message : 'Unknown processing error',
+        cause: error && error.cause && error.cause.message ? error.cause.message : null,
+        responseMeta: error && error.responseMeta ? error.responseMeta : null,
+        outputText: error && typeof error.outputText === 'string' ? error.outputText : null
+      });
+
+      if (!getVoiceRunStillCurrent(session, runId)) {
+        return null;
+      }
+
+      setVoiceSessionStatus('This recording needs another try.');
+      if (failedStep === 'transcribing') {
+        setVoiceError(
+          session,
+          'Transcription didn’t finish',
+          error && error.message ? error.message : 'We could not turn that recording into text.'
+        );
+      } else if (failedStep === 'cleaning') {
+        setVoiceError(
+          session,
+          'Transcript cleanup failed',
+          error && error.message ? error.message : 'The transcript could not be cleaned into a reviewable sentence.'
+        );
+      } else {
+        setVoiceError(
+          session,
+          'Expense extraction failed',
+          error && error.message ? error.message : 'The AI could not turn that transcript into an expense draft.'
         );
       }
       return null;
+    } finally {
+      if (voiceSession === session && session.abortController === abortController) {
+        session.abortController = null;
+      }
+      renderVoiceDraft();
     }
   }
 
-  function handleVoiceServerEvent(session, rawEvent) {
-    let payload;
+  function finalizeVoiceRecording(session) {
+    if (!session) return Promise.resolve();
+    const chunks = Array.isArray(session.recordedChunks) ? session.recordedChunks.slice() : [];
+    const mimeType = session.audioMimeType || 'audio/webm';
+    const blob = new Blob(chunks, { type: mimeType });
+    session.audioBlob = blob;
+    session.audioFileName = buildVoiceAudioFileName(mimeType);
+    session.recordedChunks = [];
+    releaseVoiceCapture(session);
+
+    if (session.closing || voiceSession !== session) {
+      return Promise.resolve();
+    }
+
+    voiceDebug.log('voice.recording.stopped', {
+      sessionId: session.id,
+      mimeType: mimeType,
+      fileName: session.audioFileName,
+      size: blob.size,
+      durationMs: session.recordingDurationMs
+    });
+
+    if (!blob.size) {
+      setVoiceSessionStatus('No audio was captured.');
+      setVoiceError(session, 'No audio captured', 'Try recording again and speak a little longer, or switch to manual entry.');
+      return Promise.resolve();
+    }
+
+    return processVoiceAudio(session, { reason: 'recording_stopped' });
+  }
+
+  async function startVoiceRecording(session) {
+    if (!session || session.starting || session.phase === 'recording' || session.phase === 'processing') return;
+    if (!navigator.onLine) {
+      setVoiceSessionStatus('Voice mode needs an internet connection.');
+      setVoiceError(session, 'No internet connection', 'Reconnect to the internet, then try recording again.');
+      return;
+    }
+    if (!isVoiceCaptureSupported()) {
+      setVoiceSessionStatus('Voice capture is unavailable on this device.');
+      setVoiceError(session, 'Voice capture is unavailable', 'This browser does not support local audio recording yet. Use manual entry instead.');
+      return;
+    }
+
+    session.starting = true;
+    setVoiceSessionStatus('Opening microphone…');
+    setVoiceSheetStatus('', '');
+    renderVoiceDraft();
 
     try {
-      payload = JSON.parse(rawEvent);
-    } catch (error) {
-      return;
-    }
-
-    if (!payload || typeof payload.type !== 'string') return;
-
-    switch (payload.type) {
-      case 'input_audio_buffer.speech_started':
-        if (!session.isMuted) {
-          setVoiceSessionStatus('Listening');
+      clearVoiceProcessing(session);
+      releaseVoiceCapture(session);
+      resetVoiceSessionResults(session);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         }
-        break;
+      });
 
-      case 'input_audio_buffer.speech_stopped':
-        if (!session.isMuted) {
-          setVoiceSessionStatus('Processing…');
+      if (voiceSession !== session || session.closing) {
+        stream.getTracks().forEach(function (track) {
+          track.stop();
+        });
+        return;
+      }
+
+      const preferredMimeType = selectVoiceRecordingMimeType();
+      let recorder;
+      try {
+        recorder = preferredMimeType
+          ? new MediaRecorder(stream, { mimeType: preferredMimeType })
+          : new MediaRecorder(stream);
+      } catch (error) {
+        recorder = new MediaRecorder(stream);
+      }
+
+      session.mediaStream = stream;
+      session.mediaRecorder = recorder;
+      session.audioMimeType = recorder.mimeType || preferredMimeType || 'audio/webm';
+      session.audioFileName = buildVoiceAudioFileName(session.audioMimeType);
+      session.recordedChunks = [];
+      session.phase = 'recording';
+      session.recordingStartedAt = Date.now();
+      session.recordingDurationMs = 0;
+      session.failedStep = null;
+      session.errorTitle = 'Processing didn’t finish';
+      session.errorMessage = 'Try processing this recording again or switch to manual entry.';
+
+      recorder.ondataavailable = function (event) {
+        if (event.data && event.data.size) {
+          session.recordedChunks.push(event.data);
         }
-        break;
+      };
 
-      case 'input_audio_buffer.committed':
-        if (payload.item_id) {
-          const commitIndex = session.commitments.findIndex(function (commit) {
-            return commit.itemId === payload.item_id;
-          });
-          const nextCommit = {
-            itemId: payload.item_id,
-            previousItemId: payload.previous_item_id || null
-          };
-
-          if (commitIndex >= 0) {
-            session.commitments[commitIndex] = nextCommit;
-          } else {
-            session.commitments.push(nextCommit);
-          }
-          rebuildVoiceTranscript(session);
-        }
-        break;
-
-      case 'conversation.item.input_audio_transcription.delta':
-        if (!payload.item_id) break;
-        ensureCommittedTurn(session, payload.item_id);
-        session.textsById[payload.item_id] = (session.textsById[payload.item_id] || '') + (payload.delta || '');
-        rebuildVoiceTranscript(session);
-        queueVoiceExtraction(session, false);
-        break;
-
-      case 'conversation.item.input_audio_transcription.completed':
-        if (!payload.item_id) break;
-        ensureCommittedTurn(session, payload.item_id);
-        session.textsById[payload.item_id] = payload.transcript || payload.text || session.textsById[payload.item_id] || '';
-        rebuildVoiceTranscript(session);
-        queueVoiceExtraction(session, true);
-        if (!session.isMuted) {
-          setVoiceSessionStatus('Listening');
-        }
-        break;
-
-      case 'conversation.item.input_audio_transcription.failed':
-        setVoiceSheetStatus('OpenAI could not transcribe part of that audio. Keep speaking or switch to manual entry.', 'error');
-        break;
-
-      case 'error':
-        setVoiceSheetStatus(
-          payload.error && payload.error.message
-            ? payload.error.message
-            : 'The OpenAI voice session returned an error.',
-          'error'
+      recorder.onerror = function (event) {
+        const error = event && event.error ? event.error : null;
+        setVoiceSessionStatus('Recording stopped unexpectedly.');
+        setVoiceError(
+          session,
+          'Recording stopped unexpectedly',
+          error && error.message ? error.message : 'Try recording again or switch to manual entry.'
         );
-        break;
+      };
 
-      default:
-        break;
+      recorder.onstop = function () {
+        finalizeVoiceRecording(session).catch(function (error) {
+          setVoiceSessionStatus('This recording needs another try.');
+          setVoiceError(
+            session,
+            'Processing didn’t finish',
+            error && error.message ? error.message : 'Try processing this recording again or switch to manual entry.'
+          );
+        });
+      };
+
+      recorder.start();
+      session.recordingTimerId = window.setInterval(function () {
+        if (voiceSession !== session || session.phase !== 'recording') return;
+        session.recordingDurationMs = Date.now() - session.recordingStartedAt;
+        renderVoiceDraft();
+      }, 250);
+      session.autoStopTimerId = window.setTimeout(function () {
+        if (voiceSession !== session || session.phase !== 'recording') return;
+        setVoiceSheetStatus('Reached the recording limit. Processing what you said now.', '');
+        stopVoiceRecording(session, { reason: 'auto_stop' });
+      }, VOICE_MAX_RECORDING_MS);
+
+      voiceDebug.log('voice.recording.started', {
+        sessionId: session.id,
+        mimeType: session.audioMimeType,
+        fileName: session.audioFileName
+      });
+      setVoiceSessionStatus('Recording… tap when you’re done.');
+      renderVoiceDraft();
+    } catch (error) {
+      setVoiceSessionStatus('Microphone unavailable');
+      setVoiceError(session, 'Microphone access failed', getVoicePermissionErrorMessage(error));
+    } finally {
+      if (session) {
+        session.starting = false;
+      }
+      renderVoiceDraft();
     }
   }
 
-  function toggleVoiceMute() {
-    if (!voiceSession) return;
+  function stopVoiceRecording(session, options) {
+    const stopOptions = options || {};
+    if (!session || session.phase !== 'recording') return;
 
-    if (!voiceSession.ready && !voiceSession.connecting) {
-      const session = voiceSession;
-      stopVoiceMedia(session);
+    clearVoiceRecordingTimers(session);
+    session.recordingDurationMs = Date.now() - session.recordingStartedAt;
+    session.phase = 'processing';
+    session.processingStep = 'transcribing';
+    setVoiceSessionStatus('Transcribing audio…');
+    if (stopOptions.reason !== 'auto_stop') {
       setVoiceSheetStatus('', '');
-      setVoiceSessionStatus('Connecting…');
-      startVoiceSession(session).catch(function (error) {
-        if (voiceSession === session) {
-          setVoiceSessionStatus('Voice unavailable');
-          setVoiceSheetStatus(
-            error && error.message ? error.message : 'Voice mode could not reconnect.',
-            'error'
-          );
-        }
-      });
+    }
+    renderVoiceDraft();
+
+    if (session.mediaRecorder && session.mediaRecorder.state !== 'inactive') {
+      try {
+        session.mediaRecorder.stop();
+      } catch (error) {
+        finalizeVoiceRecording(session).catch(function () {});
+      }
+    } else {
+      finalizeVoiceRecording(session).catch(function () {});
+    }
+  }
+
+  function retryVoiceProcessing() {
+    if (!voiceSession || !voiceSession.audioBlob) return;
+    voiceDebug.log('voice.retry_processing', {
+      sessionId: voiceSession.id,
+      hadAudio: !!voiceSession.audioBlob
+    });
+    processVoiceAudio(voiceSession, { reason: 'retry' }).catch(function (error) {
+      setVoiceSessionStatus('This recording needs another try.');
+      setVoiceError(
+        voiceSession,
+        'Processing didn’t finish',
+        error && error.message ? error.message : 'Try processing this recording again or switch to manual entry.'
+      );
+    });
+  }
+
+  function handleVoiceHeroAction() {
+    if (!voiceSession) return;
+    if (voiceSession.phase === 'recording') {
+      stopVoiceRecording(voiceSession);
       return;
     }
 
-    voiceSession.isMuted = !voiceSession.isMuted;
-    if (voiceSession.mediaTrack) {
-      voiceSession.mediaTrack.enabled = !voiceSession.isMuted;
+    if (voiceSession.phase === 'processing' || voiceSession.saving) {
+      return;
     }
-    setVoiceSessionStatus(voiceSession.isMuted ? 'Muted' : 'Listening');
-    renderVoiceDraft();
+
+    if (voiceSession.phase === 'review' || voiceSession.phase === 'error') {
+      voiceDebug.log('voice.record_again', {
+        sessionId: voiceSession.id,
+        previousPhase: voiceSession.phase,
+        hadDraft: hasConfirmedVoiceDraft(voiceSession)
+      });
+    }
+
+    startVoiceRecording(voiceSession).catch(function (error) {
+      setVoiceSessionStatus('Microphone unavailable');
+      setVoiceError(
+        voiceSession,
+        'Microphone access failed',
+        error && error.message ? error.message : 'Try again or switch to manual entry.'
+      );
+    });
   }
 
   async function handleVoiceDone() {
-    if (!voiceDraft.amount || voiceDraft.amount <= 0 || !voiceSession) {
-      setVoiceSheetStatus('Say the total amount first, or switch to manual entry.', 'error');
+    if (!voiceSession || voiceSession.phase !== 'review') return;
+    if (!voiceDraft.amount || voiceDraft.amount <= 0) {
+      setVoiceSheetStatus('Add the missing total manually before saving.', 'error');
       renderVoiceDraft();
       return;
     }
 
-    const previousMuteState = voiceSession.isMuted;
     voiceSession.saving = true;
-    if (voiceSession.mediaTrack) {
-      voiceSession.isMuted = true;
-      voiceSession.mediaTrack.enabled = false;
-    }
     setVoiceSessionStatus('Saving…');
     renderVoiceDraft();
 
     try {
-      await runVoiceExtraction(voiceSession);
+      voiceDebug.log('voice.save.requested', {
+        sessionId: voiceSession.id,
+        cleanedTranscript: voiceSession.cleanedTranscript,
+        draft: voiceDraft,
+        normalizedExpenseDraft: draftFromVoiceDraft(voiceDraft)
+      });
       const saved = await persistExpenseFromDraft(draftFromVoiceDraft(voiceDraft), { closeSheetOnSave: false });
       if (!saved) {
         setVoiceSheetStatus('A valid amount is required before saving.', 'error');
         return;
       }
+      voiceDebug.log('voice.save.persisted', {
+        sessionId: voiceSession.id,
+        expense: saved
+      });
       closeVoiceSheet();
     } finally {
       if (voiceSession) {
         voiceSession.saving = false;
-        voiceSession.isMuted = previousMuteState;
-        if (voiceSession.mediaTrack) {
-          voiceSession.mediaTrack.enabled = !previousMuteState;
+        if (voiceSession.phase === 'review') {
+          setVoiceSessionStatus('Review the result and save if it looks right.');
         }
-        setVoiceSessionStatus(previousMuteState ? 'Muted' : 'Listening');
       }
       renderVoiceDraft();
     }
   }
 
   function switchVoiceToManual() {
-    const draft = draftFromVoiceDraft(voiceDraft);
+    const draft = hasConfirmedVoiceDraft(voiceSession)
+      ? draftFromVoiceDraft(voiceDraft)
+      : buildDefaultExpenseDraft();
+    voiceDebug.log('voice.switch_manual', {
+      sessionId: voiceSession ? voiceSession.id : null,
+      usedConfirmedDraft: hasConfirmedVoiceDraft(voiceSession),
+      manualDraft: draft
+    });
     closeVoiceSheet({ preserveDraft: false });
     openSheetWithDraft(draft);
   }
@@ -2277,7 +2918,7 @@
   }
   if (voiceMicToggle) {
     voiceMicToggle.addEventListener('click', function () {
-      toggleVoiceMute();
+      handleVoiceHeroAction();
     });
   }
   if (voiceDone) {
@@ -2290,9 +2931,25 @@
       });
     });
   }
+  if (voiceRetryProcessing) {
+    voiceRetryProcessing.addEventListener('click', function () {
+      retryVoiceProcessing();
+    });
+  }
+  if (voiceRecordAgain) {
+    voiceRecordAgain.addEventListener('click', function () {
+      handleVoiceHeroAction();
+    });
+  }
   if (voiceSwitchManual) {
     voiceSwitchManual.addEventListener('click', function () {
       switchVoiceToManual();
+    });
+  }
+  if (voiceTranscriptToggle) {
+    voiceTranscriptToggle.addEventListener('click', function () {
+      voiceTranscriptExpanded = !voiceTranscriptExpanded;
+      renderVoiceDraft();
     });
   }
 
@@ -2361,7 +3018,7 @@
 
       setVoiceSettingsStatus(
         voiceSettings.enabled
-          ? 'Voice mode enabled. The mic button is now live.'
+          ? 'Voice mode enabled. The mic button is now ready.'
           : 'Voice mode disabled. Manual entry stays available.',
         voiceSettings.enabled ? 'success' : 'info'
       );

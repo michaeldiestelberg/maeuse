@@ -5,7 +5,7 @@ Mäuse is a local-first expense tracker for couples. It keeps shared expenses li
 ## Highlights
 
 - Fast manual entry with percentage or fixed partner split
-- Separate voice entry mode with live preview cards for amount, description, date, and partner share
+- Separate voice entry mode with record-then-process review for amount, description, date, and partner share
 - Monthly overview with combined totals
 - Local IndexedDB storage with JSON backup and restore
 - Installable PWA that works well on iPhone home screens
@@ -24,23 +24,28 @@ Voice mode is disabled by default and must be enabled in Settings.
 What voice mode does:
 
 - Opens a dedicated voice sheet instead of the manual form
-- Starts listening immediately
-- Updates the preview cards live while you speak
-- Hides the raw transcript from the UI
-- Lets you switch back to manual entry at any time
+- Lets you tap `Start recording`, speak one expense, and tap `Stop recording`
+- Shows a processing view while AI transcribes, cleans, and extracts the expense
+- Displays a cleaned transcript for review before saving
+- Saves exactly the reviewed draft you saw on screen
+- Lets you retry the same recording or switch back to manual entry at any time
 - Requires an internet connection and microphone access
 
 Voice implementation details:
 
-- Realtime transcription uses OpenAI `gpt-4o-mini-transcribe`
-- Structured field extraction uses OpenAI `gpt-5-nano`
-- The extractor applies the newest utterance onto the current draft so older corrections stay stable unless you change that field again
+- Audio transcription uses OpenAI `gpt-4o-transcribe`
+- Transcript cleanup uses OpenAI `gpt-5.4`
+- Structured field extraction uses OpenAI `gpt-5.4`
+- The cleaned transcript is the only semantic source of truth for extraction
+- Saving never changes fields behind the scenes; the saved expense always matches the reviewed draft you saw
+- Optional local debug logging can be enabled with `?voiceDebug=1` on desktop browsers; inspect `window.MaeuseVoiceDebug.getLogs()` or call `window.MaeuseVoiceDebug.download()` in DevTools
+- Desktop voice debug logs include recording metadata, raw transcription responses, cleanup payloads/responses, extraction payloads/responses, and parsed drafts
 
 Privacy and storage:
 
 - The OpenAI API key is stored locally on the device
 - The API key and voice-mode setting are excluded from backup exports
-- Voice mode sends microphone audio and hidden transcription data to OpenAI
+- Voice mode records locally first, then sends the audio plus hidden transcription data to OpenAI after you stop recording
 - Manual expense data stays in the app's local storage unless you export it
 
 ## Manual Entry
@@ -87,4 +92,4 @@ Useful checks:
 - IndexedDB for local persistence
 - Service Worker for offline caching
 - Progressive Web App manifest
-- OpenAI Realtime + Responses APIs for voice mode
+- OpenAI Audio Transcriptions + Responses APIs for voice mode
