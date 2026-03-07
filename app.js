@@ -96,7 +96,7 @@
   let voiceSettings = loadVoiceSettings();
   let voiceDraft = createEmptyVoiceDraft(todayISO());
   let voiceSession = null;
-  let voiceTranscriptExpanded = false;
+  // voiceTranscriptExpanded removed - simplified voice sheet has no transcript panel
 
   // ==================== DOM REFS ====================
   const $ = function (selector) { return document.querySelector(selector); };
@@ -142,35 +142,27 @@
   const voiceOverlay = $('#voiceOverlay');
   const voiceSheet = $('#voiceSheet');
   const voiceCancel = $('#voiceCancel');
-  const voiceDone = $('#voiceDone');
-  const voiceHero = $('#voiceHero');
+  const voiceDoneBtn = $('#voiceDone');
   const voiceMicToggle = $('#voiceMicToggle');
-  const voiceMicLabel = $('#voiceMicLabel');
-  const voiceMicCaption = $('#voiceMicCaption');
-  const voiceSessionStatus = $('#voiceSessionStatus');
-  const voiceSheetStatus = $('#voiceSheetStatus');
-  const voicePrivacyNote = $('#voicePrivacyNote');
-  const voiceProcessingCard = $('#voiceProcessingCard');
-  const voiceProcessingStepTranscription = $('#voiceProcessingStepTranscription');
-  const voiceProcessingStepCleanup = $('#voiceProcessingStepCleanup');
-  const voiceProcessingStepExtraction = $('#voiceProcessingStepExtraction');
-  const voiceErrorCard = $('#voiceErrorCard');
-  const voiceErrorTitle = $('#voiceErrorTitle');
-  const voiceErrorMessage = $('#voiceErrorMessage');
-  const voiceReviewSection = $('#voiceReviewSection');
-  const voiceTranscriptValue = $('#voiceTranscriptValue');
-  const voiceTranscriptToggle = $('#voiceTranscriptToggle');
+  const voiceCaptureZone = $('#voiceCaptureZone');
+  const voiceCaptureLabel = $('#voiceCaptureLabel');
+  const voiceCaptureHint = $('#voiceCaptureHint');
+  const voiceAmountDisplay = $('#voiceAmountDisplay');
   const voiceAmountValue = $('#voiceAmountValue');
-  const voiceAmountHint = $('#voiceAmountHint');
-  const voiceDescriptionValue = $('#voiceDescriptionValue');
-  const voiceDescriptionHint = $('#voiceDescriptionHint');
-  const voiceDateValue = $('#voiceDateValue');
-  const voiceDateHint = $('#voiceDateHint');
-  const voiceShareValue = $('#voiceShareValue');
-  const voiceShareHint = $('#voiceShareHint');
+  const voiceStatusText = $('#voiceStatusText');
+  const voiceErrorInline = $('#voiceErrorInline');
+  const voiceErrorText = $('#voiceErrorText');
+  const voiceResultFields = $('#voiceResultFields');
+  const voiceDescDisplay = $('#voiceDescDisplay');
+  const voiceDateDisplay = $('#voiceDateDisplay');
+  const voiceShareDisplay = $('#voiceShareDisplay');
+  const voiceFooter = $('#voiceFooter');
+  const voiceSheetStatus = $('#voiceSheetStatus');
   const voiceRecordAgain = $('#voiceRecordAgain');
   const voiceRetryProcessing = $('#voiceRetryProcessing');
   const voiceSwitchManual = $('#voiceSwitchManual');
+  const voiceFooterSep1 = $('#voiceFooterSep1');
+  const voiceFooterSep2 = $('#voiceFooterSep2');
   const onboardingEl = $('#onboarding');
   const onboardingSkipCheckbox = $('#onboardingSkip');
   const onboardingStartBtn = $('#onboardingStart');
@@ -771,9 +763,7 @@
   }
 
   function setVoiceSessionStatus(message) {
-    if (voiceSessionStatus) {
-      voiceSessionStatus.textContent = message || 'Record one expense and let AI turn it into a draft.';
-    }
+    // No-op: simplified voice sheet removed the session status element.
   }
 
   function setSettingsBusy(isBusy) {
@@ -850,12 +840,12 @@
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function canExpandVoiceTranscript(text) {
-    return normalizeVoiceText(text).length > VOICE_TRANSCRIPT_COLLAPSE_THRESHOLD;
+  function canExpandVoiceTranscript() {
+    return false;
   }
 
   function resetVoiceTranscriptExpansion() {
-    voiceTranscriptExpanded = false;
+    // No-op: simplified voice sheet has no expandable transcript
   }
 
   function resetVoiceDraft() {
@@ -963,203 +953,118 @@
     renderVoiceDraft();
   }
 
-  function updateVoiceProcessingSteps(session) {
-    const steps = [
-      { key: 'transcribing', element: voiceProcessingStepTranscription },
-      { key: 'cleaning', element: voiceProcessingStepCleanup },
-      { key: 'extracting', element: voiceProcessingStepExtraction }
-    ];
-    const order = {
-      transcribing: 0,
-      cleaning: 1,
-      extracting: 2
-    };
-    const currentIndex = session && session.processingStep ? order[session.processingStep] : -1;
-    const failedIndex = session && session.failedStep ? order[session.failedStep] : -1;
-
-    steps.forEach(function (step, index) {
-      if (!step.element) return;
-      step.element.classList.remove('is-active', 'is-done', 'is-error');
-
-      if (session && session.phase === 'review') {
-        step.element.classList.add('is-done');
-        return;
-      }
-
-      if (session && session.phase === 'processing') {
-        if (index < currentIndex) {
-          step.element.classList.add('is-done');
-        } else if (index === currentIndex) {
-          step.element.classList.add('is-active');
-        }
-        return;
-      }
-
-      if (session && session.phase === 'error' && failedIndex >= 0) {
-        if (index < failedIndex) {
-          step.element.classList.add('is-done');
-        } else if (index === failedIndex) {
-          step.element.classList.add('is-error');
-        }
-      }
-    });
-  }
-
   function renderVoiceDraft() {
-    const activeSession = voiceSession;
-    const phase = activeSession ? activeSession.phase : 'idle';
-    const heroAction = getVoiceHeroActionState(activeSession);
-    const primaryAction = getVoicePrimaryActionState(activeSession, voiceDraft);
-    const partnerAlias = voiceDraft.partnerAlias || '';
-    const defaultedFields = voiceDraft.defaultedFields || { date: false, partnerShare: false };
-    const hasReview = phase === 'review';
-    const isUnsupported = !!(activeSession && !isVoiceCaptureSupported());
-    const isRecording = phase === 'recording';
-    const isProcessing = phase === 'processing';
-    const heroVisible = phase === 'idle' || phase === 'recording';
-    const cleanedTranscript = hasReview
-      ? normalizeVoiceText(activeSession && activeSession.cleanedTranscript ? activeSession.cleanedTranscript : '')
-      : '';
-    const transcriptExpandable = hasReview && canExpandVoiceTranscript(cleanedTranscript);
+    var activeSession = voiceSession;
+    var phase = activeSession ? activeSession.phase : 'idle';
+    var heroAction = getVoiceHeroActionState(activeSession);
+    var primaryAction = getVoicePrimaryActionState(activeSession, voiceDraft);
+    var hasReview = phase === 'review';
+    var isRecording = phase === 'recording';
+    var isProcessing = phase === 'processing';
+    var isError = phase === 'error';
+    var isUnsupported = !!(activeSession && !isVoiceCaptureSupported());
+    var showCapture = phase === 'idle' || isRecording || isProcessing;
 
-    if (!transcriptExpandable && voiceTranscriptExpanded) {
-      voiceTranscriptExpanded = false;
-    }
+    // Set data-phase on voice sheet for CSS state management
+    if (voiceSheet) voiceSheet.dataset.phase = phase;
 
-    if (voiceSheet) {
-      voiceSheet.dataset.phase = phase;
-    }
-
+    // -- Mic button state --
     if (voiceMicToggle) {
-      const isBusy = !!(activeSession && (activeSession.starting || activeSession.saving || isProcessing));
-      const label = activeSession && activeSession.starting ? 'Opening microphone…' : heroAction.label;
-      const caption = activeSession && activeSession.starting ? 'Please allow microphone access' : heroAction.caption;
+      var isBusy = !!(activeSession && (activeSession.starting || activeSession.saving || isProcessing));
       voiceMicToggle.disabled = heroAction.disabled || isBusy;
       voiceMicToggle.classList.toggle('is-recording', isRecording);
-      voiceMicToggle.classList.toggle('is-processing', !!(activeSession && activeSession.starting));
+      voiceMicToggle.classList.toggle('is-processing', isProcessing || !!(activeSession && activeSession.starting));
       voiceMicToggle.classList.toggle('is-muted', isUnsupported);
-      voiceMicToggle.setAttribute('aria-label', label);
-      if (voiceMicLabel) voiceMicLabel.textContent = label;
-      if (voiceMicCaption) voiceMicCaption.textContent = caption;
+      voiceMicToggle.setAttribute('aria-label', heroAction.label);
     }
 
-    if (voiceHero) {
-      voiceHero.hidden = !heroVisible;
+    // -- Capture zone (mic area) vs amount display (review) --
+    if (voiceCaptureZone) voiceCaptureZone.hidden = !showCapture;
+    if (voiceAmountDisplay) voiceAmountDisplay.hidden = !hasReview;
+
+    // -- Capture labels --
+    if (voiceCaptureLabel) {
+      if (activeSession && activeSession.starting) {
+        voiceCaptureLabel.textContent = 'Opening microphone\u2026';
+      } else if (isRecording) {
+        voiceCaptureLabel.textContent = heroAction.caption || '0:00';
+      } else if (isProcessing) {
+        var stepLabels = {
+          transcribing: 'Transcribing audio\u2026',
+          cleaning: 'Cleaning transcript\u2026',
+          extracting: 'Extracting expense\u2026'
+        };
+        var stepLabel = activeSession && activeSession.processingStep
+          ? (stepLabels[activeSession.processingStep] || 'Processing\u2026')
+          : 'Processing\u2026';
+        voiceCaptureLabel.textContent = stepLabel;
+      } else if (isUnsupported) {
+        voiceCaptureLabel.textContent = 'Voice unavailable';
+      } else {
+        voiceCaptureLabel.textContent = 'Tap to record';
+      }
     }
-    if (voicePrivacyNote) {
-      voicePrivacyNote.hidden = !heroVisible;
+    if (voiceCaptureHint) {
+      if (isRecording) {
+        voiceCaptureHint.textContent = 'Tap again to stop';
+      } else if (isProcessing) {
+        voiceCaptureHint.textContent = 'Please wait\u2026';
+      } else if (isUnsupported) {
+        voiceCaptureHint.textContent = 'Use manual entry on this device';
+      } else {
+        voiceCaptureHint.textContent = 'Speak one expense, then stop to process it';
+      }
     }
 
-    if (voiceProcessingCard) {
-      voiceProcessingCard.hidden = phase !== 'processing';
-    }
-    if (voiceErrorCard) {
-      voiceErrorCard.hidden = phase !== 'error';
-    }
-    if (voiceReviewSection) {
-      voiceReviewSection.hidden = !hasReview;
-    }
-    if (voiceRecordAgain) {
-      voiceRecordAgain.hidden = !hasReview;
-    }
-    if (voiceRetryProcessing) {
-      voiceRetryProcessing.hidden = !(phase === 'error' && activeSession && activeSession.audioBlob);
-    }
-    if (voiceSwitchManual) {
-      voiceSwitchManual.hidden = !(phase === 'review' || phase === 'error');
-    }
-    if (voiceActions) {
-      voiceActions.hidden = !(phase === 'review' || phase === 'error');
+    // -- Status text (reserved) --
+    if (voiceStatusText) {
+      voiceStatusText.hidden = true;
     }
 
-    if (voiceDone) {
-      voiceDone.hidden = !primaryAction.visible;
-      voiceDone.disabled = primaryAction.disabled;
-      voiceDone.textContent = primaryAction.label || 'Save';
+    // -- Hero amount (review) --
+    if (voiceAmountValue && hasReview) {
+      voiceAmountValue.textContent = voiceDraft.amount ? voiceDraft.amount.toFixed(2) : '0.00';
     }
 
-    if (voiceTranscriptValue) {
-      voiceTranscriptValue.textContent = hasReview
-        ? (cleanedTranscript || 'No cleaned transcript available.')
-        : 'Waiting for processing…';
-      voiceTranscriptValue.classList.toggle('is-collapsed', transcriptExpandable && !voiceTranscriptExpanded);
-      voiceTranscriptValue.classList.toggle('is-expanded', transcriptExpandable && voiceTranscriptExpanded);
-    }
-    if (voiceTranscriptToggle) {
-      voiceTranscriptToggle.hidden = !transcriptExpandable;
-      voiceTranscriptToggle.textContent = voiceTranscriptExpanded ? 'Show less' : 'Show more';
-    }
-
-    if (voiceErrorTitle) {
-      voiceErrorTitle.textContent = activeSession && activeSession.errorTitle
-        ? activeSession.errorTitle
-        : 'Processing didn’t finish';
-    }
-    if (voiceErrorMessage) {
-      voiceErrorMessage.textContent = activeSession && activeSession.errorMessage
+    // -- Error inline --
+    if (voiceErrorInline) voiceErrorInline.hidden = !isError;
+    if (voiceErrorText && isError) {
+      voiceErrorText.textContent = activeSession && activeSession.errorMessage
         ? activeSession.errorMessage
-        : 'Try processing this recording again or switch to manual entry.';
+        : 'Processing didn\'t finish. Try again or switch to manual entry.';
     }
 
-    if (voiceAmountValue) {
-      voiceAmountValue.textContent = hasReview
-        ? (voiceDraft.amount ? formatEuro(voiceDraft.amount) : 'Missing')
-        : 'Waiting…';
-    }
-    if (voiceAmountHint) {
-      voiceAmountHint.textContent = hasReview
-        ? (voiceDraft.amount ? 'AI-extracted total' : 'Add the total manually before saving')
-        : 'Visible after processing';
-    }
-
-    if (voiceDescriptionValue) {
-      voiceDescriptionValue.textContent = hasReview
-        ? (voiceDraft.description || 'Optional')
-        : 'Waiting…';
-    }
-    if (voiceDescriptionHint) {
-      voiceDescriptionHint.textContent = hasReview
-        ? (voiceDraft.description ? 'Cleaned from your dictation' : 'Optional')
-        : 'Visible after processing';
-    }
-
-    if (voiceDateValue) {
-      voiceDateValue.textContent = hasReview
-        ? formatVoiceDate(voiceDraft.dateIso || todayISO())
-        : 'Pending';
-    }
-    if (voiceDateHint) {
-      voiceDateHint.textContent = hasReview
-        ? (defaultedFields.date ? 'Using today by default' : 'Confirmed from your dictation')
-        : 'Visible after processing';
-    }
-
-    if (voiceShareValue) {
-      if (!hasReview) {
-        voiceShareValue.textContent = 'Pending';
-      } else if (voiceDraft.partnerShareMode === 'fixed' && Number.isFinite(voiceDraft.partnerShareValue)) {
-        voiceShareValue.textContent = formatEuro(voiceDraft.partnerShareValue);
-      } else if (voiceDraft.partnerShareMode === 'percent' && Number.isFinite(voiceDraft.partnerShareValue)) {
-        voiceShareValue.textContent = formatPercent(voiceDraft.partnerShareValue);
-      } else {
-        voiceShareValue.textContent = '50 %';
-      }
-    }
-    if (voiceShareHint) {
-      if (!hasReview) {
-        voiceShareHint.textContent = 'Visible after processing';
-      } else if (defaultedFields.partnerShare) {
-        voiceShareHint.textContent = 'Using 50 % default if you save now';
-      } else if (voiceDraft.partnerShareMode === 'fixed') {
-        voiceShareHint.textContent = partnerAlias ? 'Fixed amount for ' + partnerAlias : 'Fixed amount';
-      } else if (voiceDraft.partnerShareMode === 'percent') {
-        voiceShareHint.textContent = partnerAlias ? 'Split with ' + partnerAlias : 'Percentage split';
-      } else {
-        voiceShareHint.textContent = 'No split found';
+    // -- Result fields (review) --
+    if (voiceResultFields) voiceResultFields.hidden = !hasReview;
+    if (hasReview) {
+      if (voiceDescDisplay) voiceDescDisplay.textContent = voiceDraft.description || '\u2014';
+      if (voiceDateDisplay) voiceDateDisplay.textContent = formatVoiceDate(voiceDraft.dateIso || todayISO());
+      if (voiceShareDisplay) {
+        if (voiceDraft.partnerShareMode === 'fixed' && Number.isFinite(voiceDraft.partnerShareValue)) {
+          voiceShareDisplay.textContent = formatEuro(voiceDraft.partnerShareValue);
+        } else if (voiceDraft.partnerShareMode === 'percent' && Number.isFinite(voiceDraft.partnerShareValue)) {
+          voiceShareDisplay.textContent = formatPercent(voiceDraft.partnerShareValue);
+        } else {
+          voiceShareDisplay.textContent = '50 %';
+        }
       }
     }
 
-    updateVoiceProcessingSteps(activeSession);
+    // -- Footer (review/error) --
+    if (voiceFooter) voiceFooter.hidden = !(hasReview || isError);
+    if (voiceRecordAgain) voiceRecordAgain.hidden = !(hasReview || isError);
+    var showRetry = isError && activeSession && activeSession.audioBlob;
+    if (voiceRetryProcessing) voiceRetryProcessing.hidden = !showRetry;
+    if (voiceSwitchManual) voiceSwitchManual.hidden = !(hasReview || isError);
+    if (voiceFooterSep1) voiceFooterSep1.hidden = !(hasReview || isError);
+    if (voiceFooterSep2) voiceFooterSep2.hidden = !showRetry;
+
+    // -- Done button in header --
+    if (voiceDoneBtn) {
+      voiceDoneBtn.hidden = !primaryAction.visible;
+      voiceDoneBtn.disabled = primaryAction.disabled;
+      voiceDoneBtn.textContent = primaryAction.label || 'Done';
+    }
   }
 
   function releaseVoiceCapture(session) {
@@ -2921,8 +2826,8 @@
       handleVoiceHeroAction();
     });
   }
-  if (voiceDone) {
-    voiceDone.addEventListener('click', function () {
+  if (voiceDoneBtn) {
+    voiceDoneBtn.addEventListener('click', function () {
       handleVoiceDone().catch(function (error) {
         setVoiceSheetStatus(
           error && error.message ? error.message : 'The voice draft could not be saved.',
@@ -2946,12 +2851,7 @@
       switchVoiceToManual();
     });
   }
-  if (voiceTranscriptToggle) {
-    voiceTranscriptToggle.addEventListener('click', function () {
-      voiceTranscriptExpanded = !voiceTranscriptExpanded;
-      renderVoiceDraft();
-    });
-  }
+
 
   if (settingsBtn) settingsBtn.addEventListener('click', function () { openSettingsSheet(); });
   if (settingsOverlay) settingsOverlay.addEventListener('click', closeSettingsSheet);
