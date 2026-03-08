@@ -2,6 +2,10 @@
 
 Mäuse is a local-first expense tracker for couples. It keeps shared expenses lightweight: open the app, add an amount, choose how to split it, and move on.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Mäuse app screenshot" width="320">
+</p>
+
 ## Highlights
 
 - Fast manual entry with percentage or fixed partner split
