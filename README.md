@@ -23,12 +23,12 @@ Voice mode is disabled by default and must be enabled in Settings.
 
 What voice mode does:
 
-- Opens a dedicated voice sheet instead of the manual form
-- Lets you tap `Start recording`, speak one expense, and tap `Stop recording`
-- Shows a processing view while AI transcribes, cleans, and extracts the expense
-- Displays a cleaned transcript for review before saving
+- Opens a single voice sheet with a mic button
+- Tap the mic to start recording, speak one expense, then tap again to stop
+- The mic button animates inline while AI transcribes, cleans, and extracts the expense
+- Shows the result as familiar form fields (amount, description, date, split) matching the manual entry layout
+- Tap `Done` to save, or use `Redo` / `Edit manually` to adjust
 - Saves exactly the reviewed draft you saw on screen
-- Lets you retry the same recording or switch back to manual entry at any time
 - Requires an internet connection and microphone access
 
 Voice implementation details:
